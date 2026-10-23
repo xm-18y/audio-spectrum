@@ -148,7 +148,7 @@ pub(crate) fn open_loopback(source: &DeviceInfo) -> Result<CaptureStream, Captur
         }
 
         let mut stream = Stream::new(&mut context, "music-spec-loopback", &REQUEST_SPEC, None)
-            .ok_or_else(|| "无法创建记录流".into())?;
+            .ok_or("无法创建记录流")?;
         stream
             .connect_record(Some(&source.id), None, Default::default())
             .map_err(|e| format!("连接记录流失败:{}", e.0))?;

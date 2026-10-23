@@ -197,3 +197,27 @@ fn band_edges_tile_the_axis() {
     let (_, last_hi) = a.band_edges(95);
     assert!((last_hi - 20_000.0).abs() < 0.5, "last_hi {last_hi}");
 }
+
+use music_spec_core::DecaySpeed;
+
+/// Faster decay must fall further within the same number of silent frames.
+#[test]
+fn decay_speed_paces_the_release() {
+    let mut slow = Smoother::new(4, true);
+    let mut fast = Smoother::new(4, true);
+    slow.set_decay(DecaySpeed::Slow);
+    fast.set_decay(DecaySpeed::Fast);
+
+    slow.process(&[0.0; 4]);
+    fast.process(&[0.0; 4]);
+    for _ in 0..10 {
+        slow.process(&[DB_FLOOR; 4]);
+        fast.process(&[DB_FLOOR; 4]);
+    }
+    let slow_v = slow.process(&[DB_FLOOR; 4]).bands[1];
+    let fast_v = fast.process(&[DB_FLOOR; 4]).bands[1];
+    assert!(
+        fast_v < slow_v,
+        "fast decay must fall further: fast {fast_v} slow {slow_v}"
+    );
+}

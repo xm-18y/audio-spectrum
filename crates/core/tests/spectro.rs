@@ -43,3 +43,33 @@ fn columns_carry_the_window_maximum_at_the_interval_cadence() {
     assert_eq!(sg.column(0), Some(&[-30.0; 4][..]));
     assert_eq!(sg.column(1), Some(&[-10.0; 4][..]));
 }
+
+#[test]
+fn history_wraps_at_capacity_keeping_the_newest_data() {
+    let mut sg = Spectrograph::new(2);
+
+    // 推远超 12s 容量的时间跨度(约 14.7s),把环推满并转起来。
+    // 升序值:越晚越响,才能断言「最新列 > 最老列」。
+    let mut t = 0.0;
+    for i in 0..350 {
+        t += 0.042;
+        sg.push_frame(t, &[i as f32; 2]);
+    }
+    assert_eq!(sg.len(), 600, "capacity caps the history");
+    assert_eq!(
+        sg.column(600), None,
+        "ages beyond the history are absent"
+    );
+
+    let oldest = sg.column(599).unwrap()[0];
+    let newest = sg.column(0).unwrap()[0];
+    assert!(oldest < newest, "oldest {oldest} should precede newest {newest}");
+
+    // 环转起来之后,一记响亮的新事件必须出现在最新列里。
+    t += 0.03;
+    sg.push_frame(t, &[999.0; 2]);
+    t += 0.03;
+    sg.push_frame(t, &[0.0; 2]); // 关闭的窗口应保留 999 的窗口最大值
+    assert_eq!(sg.column(0), Some(&[999.0; 2][..]));
+    assert_eq!(sg.len(), 600, "capacity must not grow after wrap");
+}

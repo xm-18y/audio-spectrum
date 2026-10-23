@@ -211,8 +211,14 @@ impl Spectrograph {
     }
 
     /// Merges one Band frame (from `Analyzer::analyze`) at `frame_time`
-    /// (seconds, monotonic-ish). Closes elapsed aggregation windows first,
-    /// then folds this frame into the newly opened window.
+    /// (seconds, monotonic-ish).
+    ///
+    /// Semantics: a frame landing inside the open window folds into its
+    /// maximum. Analysis frames (2048 samples @ 48 kHz ≈ 42.7 ms) arrive
+    /// sparser than the 20 ms column interval, so when elapsed windows
+    /// close, the closing frame also seeds each newly opened one — the
+    /// alternative (floor-filling the gaps) would stripe the display with
+    /// silence columns during normal playback.
     pub fn push_frame(&mut self, frame_time: f64, bands_db: &[f32]) {
         debug_assert_eq!(bands_db.len(), self.num_bands);
         let Some(mut start) = self.window_start else {
@@ -221,20 +227,27 @@ impl Spectrograph {
             self.pending.copy_from_slice(bands_db);
             return;
         };
+        if frame_time - start < SPECTRO_COLUMN_SECS {
+            for (p, &b) in self.pending.iter_mut().zip(bands_db) {
+                *p = p.max(b);
+            }
+            return;
+        }
         let mut closed = 0;
         while frame_time - start >= SPECTRO_COLUMN_SECS && closed < SPECTRO_COLUMN_COUNT {
-            let slot = &mut self.columns[self.head];
-            slot.copy_from_slice(&self.pending);
-            self.head = (self.head + 1) % SPECTRO_COLUMN_COUNT;
-            self.filled = (self.filled + 1).min(SPECTRO_COLUMN_COUNT);
-            self.pending.fill(DB_FLOOR);
+            self.emit();
+            self.pending.copy_from_slice(bands_db);
             start += SPECTRO_COLUMN_SECS;
             closed += 1;
         }
         self.window_start = Some(start);
-        for (p, &b) in self.pending.iter_mut().zip(bands_db) {
-            *p = p.max(b);
-        }
+    }
+
+    fn emit(&mut self) {
+        let slot = &mut self.columns[self.head];
+        slot.copy_from_slice(&self.pending);
+        self.head = (self.head + 1) % SPECTRO_COLUMN_COUNT;
+        self.filled = (self.filled + 1).min(SPECTRO_COLUMN_COUNT);
     }
 }
 
@@ -297,6 +310,11 @@ impl Smoother {
     /// Sets the decay pacing for falling display values and Peak Hold.
     pub fn set_decay(&mut self, decay: DecaySpeed) {
         self.decay = decay;
+    }
+
+    /// Turns Peak Hold on or off without resetting the display state.
+    pub fn set_peak_hold(&mut self, on: bool) {
+        self.peak_hold = on;
     }
 
     pub fn process(&mut self, target: &[f32]) -> SmoothedSpectrum {
