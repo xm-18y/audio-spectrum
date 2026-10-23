@@ -9,7 +9,9 @@ iced = { workspace = true, features = ["canvas", "image"] }
 audio-spectrum-core = { workspace = true }
 audio-spectrum-capture = { workspace = true }
 
-[target.'cfg(target_os = "windows")'.build-dependencies]
+# 构建脚本按宿主平台编译,故 winresource 必须无条件声明(纯 Rust,
+# 非 Windows 宿主仅编译不调用);嵌入逻辑由 build.rs 内的目标平台检查守卫。
+[build-dependencies]
 winresource = "0.1"
 
 [dependencies.serde]
