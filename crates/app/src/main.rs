@@ -1589,30 +1589,14 @@ fn dropdown(app: &SpectrumApp, tab: MenuTab) -> Element<'_, Message> {
             if app.loopback_devices.is_empty() && app.input_devices.is_empty() {
                 items.push(text(note).size(12.0).color(SECTION_FG).into());
             } else {
-                for (devices, label, empty_hint) in [
-                    (
-                        &app.loopback_devices,
-                        "Loopback(系统回环)",
-                        "未发现输出设备",
-                    ),
-                    (
-                        &app.input_devices,
-                        "Input(麦克风/输入)",
-                        "未发现录音设备(可能已在系统声音设置中禁用)",
-                    ),
+                for (devices, label) in [
+                    (&app.loopback_devices, "Loopback"),
+                    (&app.input_devices, "Input"),
                 ] {
-                    items.push(section_label(label).into());
                     if devices.is_empty() {
-                        // 空分组不再隐藏:明确提示原因,便于定位系统设置。
-                        items.push(
-                            text(empty_hint)
-                                .size(12.0)
-                                .color(SECTION_FG)
-                                .font(CJK_FONT)
-                                .into(),
-                        );
                         continue;
                     }
+                    items.push(section_label(label).into());
                     for info in devices {
                         let selected = app.source.as_ref().is_some_and(|s| s.id == info.id);
                         items.push(source_item(info, selected, 13.0));
