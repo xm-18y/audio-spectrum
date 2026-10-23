@@ -7,6 +7,7 @@
 
 ```bash
 cargo run -p music-spec-app   # macOS 首次运行会请求麦克风权限
+# 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻;顶栏:⚙ 设置、置顶
 scripts/bundle-macos.sh       # 打包 .app(Dock/启动台图标 + Info.plist + 麦克风用途声明)
 open target/release/music-spec.app
 cargo test                    # core 管线 9 个行为测试 + 性能预算断言 + SCK 实机集成
@@ -37,12 +38,18 @@ crates/
 
 ## 状态
 
+- ✅ v0.2.0 功能纵深(陪伴式视觉化,ADR-0003):
+  - **语谱图**(Spectrogram):12s 滚动历史、20ms 列聚合(窗口最大值)、
+    复用 96 Band 对数轴、纹理单 quad 渲染;`S` 键或顶栏按钮切换
+  - **检视交互**:悬停显示 `频率 · dB`(光标跟随);`Space` 冻结画面
+  - **极简三件套设置**:频段数 64/96、Peak Hold 开关、衰减速度(慢/中/快)
+  - **窗口置顶** toggle(陪伴场景钉在角落)
 - ✅ 输入采集(麦克风/线路输入):三平台,含设备选择与断线重连
 - ✅ Loopback(系统回环):三平台后端已实现
   - macOS:ScreenCaptureKit,实机验证(集成测试:`cargo test -p music-spec-capture`)
   - Windows:WASAPI loopback,交叉编译验证(x86_64-pc-windows-msvc,待实机)
   - Linux:PulseAudio monitor(PipeWire 经兼容层),源码级验证(待 Linux 机器编译)
-- ✅ 频谱管线 + 平滑 + Peak Hold:11 个测试全绿,clippy 零警告
+- ✅ 频谱管线 + 平滑 + Peak Hold + 语谱历史:16 个测试全绿,clippy 零警告
 - ✅ 性能预算:已仪表化
   - 自动断言:`cargo test -p music-spec-core --test perf`(实测 release 25.6µs/帧,
     帧预算 16.7ms 的 0.15%,验证 ADR-0002 的微秒级假设)
@@ -56,8 +63,8 @@ GitHub Actions(`.github/workflows/build.yml`)三平台构建:
 - **触发**:每次 push + 手动 `workflow_dispatch`
 - **矩阵**:macOS arm64(`.app` zip)、Windows x64(zip)、Linux x64(tar.gz),
   含 `cargo test` 与性能预算断言(CI 无音频硬件时自动跳过 SCK 实机集成测试)
-- **下载链接**:main 分支/手动触发 → 滚动 prerelease `latest`,链接永久稳定:
-  `…/releases/download/latest/music-spec-macos-arm64.zip` 等;
+- **下载链接**:main 分支/手动触发 → 滚动 prerelease `latest`(链接永久稳定);
+  推送 `v*` tag → 该 tag 的正式 Release;
   其他分支 → run 级 Artifacts
 - 首次接入:
   ```bash

@@ -291,10 +291,6 @@ impl DecaySpeed {
 
 /// Fraction of the remaining gap closed on a rising frame.
 const ATTACK: f32 = 0.85;
-/// Fraction of the remaining gap closed on a falling frame.
-const RELEASE: f32 = 0.05;
-/// Peak Hold decay, dB per frame.
-const PEAK_DECAY_DB: f32 = 0.4;
 
 impl Smoother {
     pub fn new(num_bands: usize, peak_hold: bool) -> Smoother {
@@ -321,7 +317,11 @@ impl Smoother {
         debug_assert_eq!(target.len(), self.num_bands);
         for (i, &t) in target.iter().enumerate() {
             let cur = self.bands[i];
-            let coef = if t > cur { ATTACK } else { self.decay.release() };
+            let coef = if t > cur {
+                ATTACK
+            } else {
+                self.decay.release()
+            };
             self.bands[i] = cur + coef * (t - cur);
             self.peaks[i] = if self.peak_hold {
                 t.max(self.peaks[i] - self.decay.peak_decay())

@@ -3,7 +3,7 @@
 //! axis — ADR-0003). Pure computation; time is a parameter, so tests are
 //! headless.
 
-use music_spec_core::{DB_FLOOR, Spectrograph};
+use music_spec_core::Spectrograph;
 
 fn bands(num: usize, value: f32) -> Vec<f32> {
     vec![value; num]
@@ -14,7 +14,10 @@ fn fresh_spectrograph_is_empty_and_first_frame_only_opens_a_window() {
     let mut sg = Spectrograph::new(96);
     assert_eq!(sg.num_bands(), 96);
     assert_eq!(sg.len(), 0);
-    assert!(sg.column(0).is_none(), "empty history must expose no columns");
+    assert!(
+        sg.column(0).is_none(),
+        "empty history must expose no columns"
+    );
 
     // The first frame opens the first aggregation window; nothing is
     // emitted until an interval has actually passed.
@@ -56,14 +59,14 @@ fn history_wraps_at_capacity_keeping_the_newest_data() {
         sg.push_frame(t, &[i as f32; 2]);
     }
     assert_eq!(sg.len(), 600, "capacity caps the history");
-    assert_eq!(
-        sg.column(600), None,
-        "ages beyond the history are absent"
-    );
+    assert_eq!(sg.column(600), None, "ages beyond the history are absent");
 
     let oldest = sg.column(599).unwrap()[0];
     let newest = sg.column(0).unwrap()[0];
-    assert!(oldest < newest, "oldest {oldest} should precede newest {newest}");
+    assert!(
+        oldest < newest,
+        "oldest {oldest} should precede newest {newest}"
+    );
 
     // 环转起来之后,一记响亮的新事件必须出现在最新列里。
     t += 0.03;

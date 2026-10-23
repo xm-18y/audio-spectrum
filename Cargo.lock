@@ -1928,7 +1928,7 @@ dependencies = [
 
 [[package]]
 name = "music-spec-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "music-spec-capture",
@@ -1937,7 +1937,7 @@ dependencies = [
 
 [[package]]
 name = "music-spec-capture"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "block2 0.6.2",
  "cpal",
@@ -1954,7 +1954,7 @@ dependencies = [
 
 [[package]]
 name = "music-spec-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "realfft",
 ]
