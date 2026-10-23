@@ -1056,14 +1056,22 @@ impl SpectrumApp {
                     }
                 }
                 painter.add(Shape::mesh(mesh));
-                if rounding > 0.0 {
-                    // 圆角仅作为轻量顶帽处理,避免整柱复杂形状。
+                if rounding > 0.0 && bottom - bar_top > 2.0 * rounding + 1.0 {
+                    // 顶部圆角:帽体完全位于柱内(旧实现半悬在柱顶上方,
+                    // 衰减时会像小方块一样骑柱滑落——v0.4.2 修复)。
+                    // 颜色与渐变顶端顶点同色,接缝不可见。
+                    let cap_r = rounding.round().clamp(0.0, 255.0) as u8;
                     painter.rect_filled(
                         Rect::from_min_max(
-                            Pos2::new(x0, bar_top - rounding),
-                            Pos2::new(x1, bar_top + rounding),
+                            Pos2::new(x0, bar_top),
+                            Pos2::new(x1, bar_top + 2.0 * rounding),
                         ),
-                        rounding,
+                        egui::CornerRadius {
+                            nw: cap_r,
+                            ne: cap_r,
+                            sw: 0,
+                            se: 0,
+                        },
                         band_color(pal, 1.0),
                     );
                 }
