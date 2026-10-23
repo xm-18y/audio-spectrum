@@ -1,0 +1,134 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.artifact }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: music-spec-macos-arm64
+          - os: windows-latest
+            artifact: music-spec-windows-x64
+          - os: ubuntu-latest
+            artifact: music-spec-linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux audio build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libpulse-dev libclang-dev clang pkg-config
+
+      - name: Build (release)
+        run: cargo build --release --workspace
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Bundle .app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          ./scripts/bundle-macos.sh
+          mkdir -p dist
+          ditto -c -k --keepParent target/release/music-spec.app dist/music-spec-macos-arm64.zip
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir dist
+          Copy-Item target/release/music-spec-app.exe dist/music-spec.exe
+          Compress-Archive -Path dist/music-spec.exe -DestinationPath dist/music-spec-windows-x64.zip
+          Remove-Item dist/music-spec.exe
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          tar -czf dist/music-spec-linux-x64.tar.gz -C target/release music-spec-app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+
+      - name: Run summary
+        shell: bash
+        run: |
+          echo "### 构建产物(run 级)" >> "$GITHUB_STEP_SUMMARY"
+          echo "已上传为 workflow artifact:[本次运行的 Artifacts 区]" \
+            "(${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})" >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: publish download links
+    needs: build
+    # 滚动 prerelease 提供**稳定下载链接**;非 main 分支的 push 只出 artifacts。
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish rolling prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="latest"
+          REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          # 滚动标签:同一 URL 永远指向最新构建。
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          cat > notes.md <<EOF
+          ## music-spec 构建产物
+
+          - 提交:\`${GITHUB_SHA}\`
+          - 运行记录:${REPO_URL}/actions/runs/${GITHUB_RUN_ID}
+          - 触发:\`${GITHUB_EVENT_NAME}\`
+          EOF
+          gh release create "$TAG" \
+            --prerelease \
+            --title "music-spec $(git rev-parse --short HEAD)" \
+            --notes-file notes.md \
+            dist/*
+
+      - name: Job summary with download links
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          {
+            echo "## 下载链接"
+            echo ""
+            for f in dist/*; do
+              base="$(basename "$f")"
+              echo "- [${base}](${REPO_URL}/releases/download/latest/${base})"
+            done
+            echo ""
+            echo "发布页:${REPO_URL}/releases/tag/latest"
+          } >> "$GITHUB_STEP_SUMMARY"

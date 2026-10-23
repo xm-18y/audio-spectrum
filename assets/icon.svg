@@ -1,0 +1,72 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background: bright warm neutral diagonal gradient -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdfaf7"/>
+      <stop offset="1" stop-color="#f0e2d4"/>
+    </linearGradient>
+
+    <!-- Ambient glow behind the spectrum -->
+    <radialGradient id="glow" cx="0.5" cy="0.68" r="0.55">
+      <stop offset="0" stop-color="#f5c39a" stop-opacity="0.6"/>
+      <stop offset="0.6" stop-color="#eda36c" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#eda36c" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Spectrum bands: desaturated teal (low freq) -> muted bronze -> warm orange (high freq) -->
+    <linearGradient id="band" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#7fa8ac"/>
+      <stop offset="0.55" stop-color="#b08d70"/>
+      <stop offset="1" stop-color="#c98a5e"/>
+    </linearGradient>
+
+    <!-- Top-edge glass highlight -->
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="0.35" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#glow)"/>
+
+  <!-- Spectrum bands (Band row, baseline y=680) -->
+  <g fill="url(#band)" transform="translate(0 60)">
+    <rect x="57"  y="568" width="52" height="112" rx="13"/>
+    <rect x="135" y="520" width="52" height="160" rx="13"/>
+    <rect x="213" y="450" width="52" height="230" rx="13"/>
+    <rect x="291" y="350" width="52" height="330" rx="13"/>
+    <rect x="369" y="260" width="52" height="420" rx="13"/>
+    <rect x="447" y="210" width="52" height="470" rx="13"/>
+    <rect x="525" y="200" width="52" height="480" rx="13"/>
+    <rect x="603" y="250" width="52" height="430" rx="13"/>
+    <rect x="681" y="320" width="52" height="360" rx="13"/>
+    <rect x="759" y="400" width="52" height="280" rx="13"/>
+    <rect x="837" y="470" width="52" height="210" rx="13"/>
+    <rect x="915" y="530" width="52" height="150" rx="13"/>
+  </g>
+
+  <!-- Peak Hold caps (floating decaying maxima above each Band) -->
+  <g fill="#3d2f24" opacity="0.85" transform="translate(0 60)">
+    <rect x="57"  y="536" width="52" height="9" rx="4.5"/>
+    <rect x="135" y="484" width="52" height="9" rx="4.5"/>
+    <rect x="213" y="410" width="52" height="9" rx="4.5"/>
+    <rect x="291" y="302" width="52" height="9" rx="4.5"/>
+    <rect x="369" y="204" width="52" height="9" rx="4.5"/>
+    <rect x="447" y="148" width="52" height="9" rx="4.5"/>
+    <rect x="525" y="132" width="52" height="9" rx="4.5"/>
+    <rect x="603" y="188" width="52" height="9" rx="4.5"/>
+    <rect x="681" y="264" width="52" height="9" rx="4.5"/>
+    <rect x="759" y="348" width="52" height="9" rx="4.5"/>
+    <rect x="837" y="422" width="52" height="9" rx="4.5"/>
+    <rect x="915" y="490" width="52" height="9" rx="4.5"/>
+  </g>
+
+  <!-- Glass highlight + hairline border -->
+  <path d="M0 232 C0 104 104 0 232 0 H792 C920 0 1024 104 1024 232 V340
+           C700 420 324 420 0 340 Z" fill="url(#glass)"/>
+  <rect x="1.5" y="1.5" width="1021" height="1021" rx="230.5"
+        fill="none" stroke="#3d2f24" stroke-opacity="0.08" stroke-width="3"/>
+</svg>

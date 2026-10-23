@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/capture", "crates/app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+music-spec-core = { path = "crates/core" }
+music-spec-capture = { path = "crates/capture" }
+realfft = "3.5"
+cpal = "0.18"
+ringbuf = "0.5"
+eframe = "0.37"
+objc2-screen-capture-kit = "0.3.2"
+libpulse-binding = "2.30.1"

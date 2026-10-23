@@ -1,0 +1,8 @@
+[package]
+name = "music-spec-core"
+version.workspace = true
+edition.workspace = true
+description = "Spectrum pipeline: PCM samples in, per-Band dBFS out. Pure computation, no I/O."
+
+[dependencies]
+realfft = { workspace = true }
