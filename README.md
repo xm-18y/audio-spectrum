@@ -7,7 +7,10 @@
 
 ```bash
 cargo run -p music-spec-app   # macOS 首次运行会请求麦克风权限
-# 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻;顶栏:⚙ 设置、置顶
+# 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻;ESC/右键 = 退出全屏
+# ⚙ 菜单:声源/视图/显示/样式/背景/窗口;设置存于
+#   macOS ~/Library/Application Support/music-spec/settings.ron
+#   Windows %APPDATA%\music-spec\settings.ron · Linux ~/.config/music-spec/
 scripts/bundle-macos.sh       # 打包 .app(Dock/启动台图标 + Info.plist + 麦克风用途声明)
 open target/release/music-spec.app
 cargo test                    # core 管线 9 个行为测试 + 性能预算断言 + SCK 实机集成
@@ -38,6 +41,11 @@ crates/
 
 ## 状态
 
+- ✅ v0.3.0 个性化中枢:设置持久化(ron,`dirs` 平台惯例目录,300ms 防抖,
+  损坏静默回默认)——样式主题(5 预设 + 逐槽颜色覆盖/圆角/间隙/网格)、
+  背景图(选择/缩放 填满·适应·平铺/不透明度/预烘焙模糊)、窗口(默认
+  全屏、尺寸位置记忆);频谱占满窗体,配置全部收进 ⚙ 菜单;全屏时
+  顶栏自动隐藏(贴顶 8px 浮现),ESC/右键退全屏
 - ✅ v0.2.0 功能纵深(陪伴式视觉化,ADR-0003):
   - **语谱图**(Spectrogram):12s 滚动历史、20ms 列聚合(窗口最大值)、
     复用 96 Band 对数轴、纹理单 quad 渲染;`S` 键或顶栏按钮切换
@@ -49,7 +57,7 @@ crates/
   - macOS:ScreenCaptureKit,实机验证(集成测试:`cargo test -p music-spec-capture`)
   - Windows:WASAPI loopback,交叉编译验证(x86_64-pc-windows-msvc,待实机)
   - Linux:PulseAudio monitor(PipeWire 经兼容层),源码级验证(待 Linux 机器编译)
-- ✅ 频谱管线 + 平滑 + Peak Hold + 语谱历史:16 个测试全绿,clippy 零警告
+- ✅ 频谱管线 + 平滑 + Peak Hold + 语谱历史 + 设置中枢:22 个测试全绿,clippy 零警告
 - ✅ 性能预算:已仪表化
   - 自动断言:`cargo test -p music-spec-core --test perf`(实测 release 25.6µs/帧,
     帧预算 16.7ms 的 0.15%,验证 ADR-0002 的微秒级假设)

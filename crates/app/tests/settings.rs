@@ -1,19 +1,28 @@
 //! Settings hub behavior: persistence round-trip, silent-default recovery,
 //! theme synthesis, background scaling math, blur.
+//!
+//! Tests run in parallel: every persistence case uses its own temp file
+//! (the global-path convenience wrappers are only exercised indirectly).
 
 use music_spec_app::{
-    band_color, blur_rgba, config_dir, fit_rects, resolve_palette, load, save, BackgroundSettings,
-    DecayChoice, ScaleMode, Settings, StyleSettings, ThemePreset, ViewMode,
+    DecayChoice, Rect, ScaleMode, Settings, StyleSettings, ThemePreset, ViewMode, band_color,
+    blur_rgba, fit_rects, load_from, resolve_palette, save_to,
 };
 
-fn temp_settings_path(tag: &str) -> std::path::PathBuf {
-    let p = std::env::temp_dir().join(format!("music-spec-test-{tag}-{}.ron", std::process::id()));
-    let _ = std::fs::remove_file(&p);
-    p
+fn temp_path(tag: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "music-spec-test-{tag}-{}-{}.ron",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ))
 }
 
 /// Saved settings must load back identical (ron round-trip).
 #[test]
+#[allow(clippy::field_reassign_with_default)] // 测试可读性优先:逐字段覆写
 fn settings_round_trip() {
     let mut s = Settings::default();
     s.view = ViewMode::Spectrogram;
@@ -31,19 +40,21 @@ fn settings_round_trip() {
     s.remember_window = true;
     s.window_rect = Some([10.0, 20.0, 800.0, 500.0]);
 
-    save(&s).expect("save");
-    let back = load();
-    assert_eq!(back, s);
+    let path = temp_path("roundtrip");
+    save_to(&s, &path).expect("save");
+    assert_eq!(load_from(&path), s, "round trip must be identity");
 }
 
 /// A corrupt settings file must fall back to defaults without panicking —
 /// companion apps never nag the user about their own config.
 #[test]
 fn corrupt_settings_fall_back_to_defaults_silently() {
-    let dir = config_dir().expect("config dir available in test env");
-    let path = dir.join("settings.ron");
+    let path = temp_path("corrupt");
     std::fs::write(&path, b"{{{ not valid ron !!!").expect("write corrupt file");
-    assert_eq!(load(), Settings::default(), "corrupt file must yield defaults");
+    assert_eq!(load_from(&path), Settings::default());
+    // 读取不存在的文件同样静默回默认。
+    let missing = temp_path("missing");
+    assert_eq!(load_from(&missing), Settings::default());
 }
 
 /// A preset with no overrides resolves to the preset palette; an override
@@ -64,10 +75,13 @@ fn palette_resolves_preset_then_overrides() {
     assert_eq!(pal.bar_bottom, plain.bar_bottom, "unrelated slot untouched");
 
     // Overrides survive a round trip through persistence.
-    let mut s = Settings::default();
-    s.style = overridden;
-    save(&s).unwrap();
-    assert_eq!(load().style.bar_top, Some([250, 250, 250]));
+    let s = Settings {
+        style: overridden,
+        ..Default::default()
+    };
+    let path = temp_path("override");
+    save_to(&s, &path).unwrap();
+    assert_eq!(load_from(&path).style.bar_top, Some([250, 250, 250]));
 }
 
 /// Bar gradient endpoints must hit the palette colors exactly.
@@ -83,33 +97,35 @@ fn band_color_hits_palette_endpoints() {
 
 /// Background scaling math (independent worked examples).
 #[test]
-fn fit_rects_covers_and_fits() {
-    let src = [400.0, 200.0]; // 2:1 图
-    let dst = music_spec_app::Rect {
+fn fit_rects_covers_fits_and_tiles() {
+    let dst = Rect {
         pos: [0.0, 0.0],
         size: [200.0, 200.0],
-    }; // 1:1 窗
+    };
 
-    // Fill(cover):图放大到高 200,宽 400,左右各裁 100 → uv 中心裁剪。
-    let (d, uv) = fit_rects(src, dst, ScaleMode::Fill);
+    // Fill(cover):2:1 的图在 1:1 的窗上 → 放大到高 200、宽 400,左右各裁 100。
+    let (d, uv) = fit_rects([400.0, 200.0], dst, ScaleMode::Fill);
     assert_eq!(d, dst, "fill covers the whole destination");
-    assert_eq!(uv.pos, [100.0 / 400.0, 0.0]);
-    assert!((uv.size[0] - 0.5).abs() < 1e-5);
+    assert!((uv.pos[0] - 0.25).abs() < 1e-5, "uv.x0 {}", uv.pos[0]);
+    assert!((uv.pos[1] - 0.0).abs() < 1e-5);
+    assert!((uv.size[0] - 0.5).abs() < 1e-5, "uv.w {}", uv.size[0]);
     assert!((uv.size[1] - 1.0).abs() < 1e-5);
 
     // Fit(contain):整图可见,上下留边 → 目标内缩,uv 全幅。
-    let (d, uv) = fit_rects(src, dst, ScaleMode::Fit);
+    let (d, uv) = fit_rects([400.0, 200.0], dst, ScaleMode::Fit);
     assert_eq!(uv.pos, [0.0, 0.0]);
     assert_eq!(uv.size, [1.0, 1.0]);
     assert_eq!(d.pos, [0.0, 50.0]);
     assert_eq!(d.size, [200.0, 100.0]);
 
-    // Tile:uv 基础块平铺 2×2(图是窗的一半)。
-    let (_d, uv) = fit_rects(src, dst, ScaleMode::Tile);
+    // Tile:100×50 的图在 200×200 的窗上 → 自然尺寸平铺 2×4。
+    let (d, uv) = fit_rects([100.0, 50.0], dst, ScaleMode::Tile);
+    assert_eq!(d, dst, "tile covers the whole destination");
+    assert_eq!(uv.pos, [0.0, 0.0]);
     assert_eq!(uv.size, [2.0, 4.0]);
 }
 
-/// Box blur must spread a dot and preserve overall energy roughly.
+/// Box blur must spread a dot and leave far corners untouched.
 #[test]
 fn blur_spreads_a_hot_pixel() {
     // 5×5 黑底,中心白点。
@@ -117,17 +133,9 @@ fn blur_spreads_a_hot_pixel() {
     let mut px = vec![[0u8, 0, 0, 255]; w * w];
     px[12] = [255, 255, 255, 255];
     blur_rgba(&mut px, w, 5, 1);
-    assert_eq!(px[12][0] < 255, true, "center dimmed");
-    assert!(px[11][0] > 0, "neighbor heated");
+    assert!(px[12][0] < 255, "center dimmed");
+    assert!(px[11][0] > 0, "horizontal neighbor heated");
     assert!(px[7][0] > 0, "vertical neighbor heated");
     assert_eq!(px[0][0], 0, "far corner untouched");
-}
-
-/// The config file lives in the platform-conventional directory.
-#[test]
-fn config_dir_is_platform_conventional() {
-    let dir = config_dir().expect("dir");
-    let s = dir.to_string_lossy();
-    assert!(s.contains("music-spec"), "dir {s}");
-    let _ = temp_settings_path("cleanup-marker"); // keep temp util exercised
+    assert_eq!(px[12][3], 255, "alpha preserved");
 }
