@@ -6,7 +6,11 @@ A cross-platform (Windows/macOS/Linux) desktop application that displays the rea
 
 **Spectrum**:
 The magnitudes of all audible frequencies at a single moment, rendered as animated bars or a curve.
-_Avoid_: spectrogram, FFT result, waveform, VU meter
+_Avoid_: FFT result, waveform, VU meter
+
+**Spectrogram**:
+A scrolling time×frequency heat map: one column per aggregation interval, colored by that interval's per-Band maximum. Reuses the Spectrum's log Band axis.
+_Avoid_: waterfall, spectrogram history
 
 **Input Capture**:
 Acquiring audio from microphone or line-in devices.

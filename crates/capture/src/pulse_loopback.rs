@@ -139,7 +139,7 @@ pub(crate) fn open_loopback(source: &DeviceInfo) -> Result<CaptureStream, Captur
     // Setup with the PA lock held; early exits below remember to stop the loop.
     let setup = (|| -> Result<(Context, Stream), String> {
         let mut context =
-            Context::new(&mainloop, APP_NAME).ok_or_else(|| "无法创建上下文".into())?;
+            Context::new(&mainloop, APP_NAME).ok_or("无法创建上下文")?;
         context
             .connect(None, FlagSet::NOFAIL, None)
             .map_err(|e| format!("连接 PulseAudio 失败:{}", e.0))?;

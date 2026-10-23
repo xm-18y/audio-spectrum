@@ -153,13 +153,127 @@ pub struct SmoothedSpectrum {
     pub peaks: Vec<f32>,
 }
 
+/// Aggregation interval of one Spectrogram column, in seconds.
+pub const SPECTRO_COLUMN_SECS: f64 = 0.020;
+/// Total Spectrogram history, in seconds.
+pub const SPECTRO_HISTORY_SECS: f32 = 12.0;
+/// History capacity in columns (history / interval).
+pub const SPECTRO_COLUMN_COUNT: usize =
+    (SPECTRO_HISTORY_SECS as f64 / SPECTRO_COLUMN_SECS) as usize;
+
+/// Scrolling Spectrogram history: aggregates per-Band frames into columns
+/// holding each interval's maximum (ADR-0003: reuses the Band log axis).
+/// Pure computation; time arrives as a parameter.
+pub struct Spectrograph {
+    num_bands: usize,
+    /// Ring of columns, `head` is the next write slot.
+    columns: Vec<Vec<f32>>,
+    head: usize,
+    filled: usize,
+    /// Running maximum of the currently open aggregation window.
+    pending: Vec<f32>,
+    /// Window start of the open interval; `None` until the first frame.
+    window_start: Option<f64>,
+}
+
+impl Spectrograph {
+    pub fn new(num_bands: usize) -> Spectrograph {
+        Spectrograph {
+            num_bands,
+            columns: vec![vec![DB_FLOOR; num_bands]; SPECTRO_COLUMN_COUNT],
+            head: 0,
+            filled: 0,
+            pending: vec![DB_FLOOR; num_bands],
+            window_start: None,
+        }
+    }
+
+    pub fn num_bands(&self) -> usize {
+        self.num_bands
+    }
+
+    /// Number of columns currently held (≤ [`SPECTRO_COLUMN_COUNT`]).
+    pub fn len(&self) -> usize {
+        self.filled
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.filled == 0
+    }
+
+    /// The column `age` intervals behind the newest one, or `None`.
+    pub fn column(&self, age: usize) -> Option<&[f32]> {
+        if age >= self.filled {
+            return None;
+        }
+        let idx = (self.head + SPECTRO_COLUMN_COUNT - 1 - age) % SPECTRO_COLUMN_COUNT;
+        Some(&self.columns[idx])
+    }
+
+    /// Merges one Band frame (from `Analyzer::analyze`) at `frame_time`
+    /// (seconds, monotonic-ish). Closes elapsed aggregation windows first,
+    /// then folds this frame into the newly opened window.
+    pub fn push_frame(&mut self, frame_time: f64, bands_db: &[f32]) {
+        debug_assert_eq!(bands_db.len(), self.num_bands);
+        let Some(mut start) = self.window_start else {
+            // First frame: open the first window, nothing emitted yet.
+            self.window_start = Some(frame_time);
+            self.pending.copy_from_slice(bands_db);
+            return;
+        };
+        let mut closed = 0;
+        while frame_time - start >= SPECTRO_COLUMN_SECS && closed < SPECTRO_COLUMN_COUNT {
+            let slot = &mut self.columns[self.head];
+            slot.copy_from_slice(&self.pending);
+            self.head = (self.head + 1) % SPECTRO_COLUMN_COUNT;
+            self.filled = (self.filled + 1).min(SPECTRO_COLUMN_COUNT);
+            self.pending.fill(DB_FLOOR);
+            start += SPECTRO_COLUMN_SECS;
+            closed += 1;
+        }
+        self.window_start = Some(start);
+        for (p, &b) in self.pending.iter_mut().zip(bands_db) {
+            *p = p.max(b);
+        }
+    }
+}
+
 /// Temporal smoothing: fast attack, slow release, optional Peak Hold.
 /// Coefficients are per frame at ~60 fps (visual layer only).
 pub struct Smoother {
     num_bands: usize,
     peak_hold: bool,
+    decay: DecaySpeed,
     bands: Vec<f32>,
     peaks: Vec<f32>,
+}
+
+/// Per-frame decay pacing of the display values and Peak Hold.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DecaySpeed {
+    Slow,
+    Medium,
+    Fast,
+}
+
+impl DecaySpeed {
+    /// Fraction of the remaining gap closed on a falling frame.
+    fn release(self) -> f32 {
+        match self {
+            DecaySpeed::Slow => 0.02,
+            DecaySpeed::Medium => 0.05,
+            DecaySpeed::Fast => 0.12,
+        }
+    }
+
+    /// Peak Hold decay, dB per frame.
+    fn peak_decay(self) -> f32 {
+        match self {
+            DecaySpeed::Slow => 0.2,
+            DecaySpeed::Medium => 0.4,
+            DecaySpeed::Fast => 0.8,
+        }
+    }
 }
 
 /// Fraction of the remaining gap closed on a rising frame.
@@ -174,19 +288,25 @@ impl Smoother {
         Smoother {
             num_bands,
             peak_hold,
+            decay: DecaySpeed::Medium,
             bands: vec![DB_FLOOR; num_bands],
             peaks: vec![DB_FLOOR; num_bands],
         }
+    }
+
+    /// Sets the decay pacing for falling display values and Peak Hold.
+    pub fn set_decay(&mut self, decay: DecaySpeed) {
+        self.decay = decay;
     }
 
     pub fn process(&mut self, target: &[f32]) -> SmoothedSpectrum {
         debug_assert_eq!(target.len(), self.num_bands);
         for (i, &t) in target.iter().enumerate() {
             let cur = self.bands[i];
-            let coef = if t > cur { ATTACK } else { RELEASE };
+            let coef = if t > cur { ATTACK } else { self.decay.release() };
             self.bands[i] = cur + coef * (t - cur);
             self.peaks[i] = if self.peak_hold {
-                t.max(self.peaks[i] - PEAK_DECAY_DB)
+                t.max(self.peaks[i] - self.decay.peak_decay())
             } else {
                 self.bands[i]
             };
