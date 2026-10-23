@@ -7,9 +7,9 @@
 
 ```bash
 cargo run -p music-spec-app   # macOS 首次运行会请求麦克风权限
-# 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻,⌘, = 设置,F11 = 全屏切换;
-# ESC 关窗/退全屏;配置入口:右上角 ⚙ 浮钮 / 原生菜单栏(macOS)/ 右键菜单
-# 设置存于
+# 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻,⌘, = 设置,
+# F11 = 全屏(仅 Windows/Linux;macOS 用 ⌘F),ESC 关窗/退全屏
+# 配置入口:原生菜单栏(macOS)/ 画布右键菜单(Windows/Linux);设置存于
 #   macOS ~/Library/Application Support/music-spec/settings.ron
 #   Windows %APPDATA%\music-spec\settings.ron · Linux ~/.config/music-spec/
 scripts/bundle-macos.sh       # 打包 .app(Dock/启动台图标 + Info.plist + 麦克风用途声明)

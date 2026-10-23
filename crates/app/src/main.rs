@@ -380,7 +380,9 @@ impl eframe::App for SpectrumApp {
             if i.key_pressed(egui::Key::Comma) && i.modifiers.command {
                 self.settings_open = true;
             }
-            // F11:全屏切换(仅窗口激活时收到,天然满足「窗口激活」语义)。
+            // F11:全屏切换(仅非 macOS;macOS 的 F11 是系统调度中心热键,
+            // 全屏走 ⌘F/原生菜单/窗口绿色按钮)。egui 仅在焦点窗口收到按键。
+            #[cfg(not(target_os = "macos"))]
             if i.key_pressed(egui::Key::F11) {
                 ui.ctx()
                     .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!self.fullscreen));
