@@ -2,9 +2,8 @@
 //! music-spec-app — the egui shell of music-spec.
 //!
 //! v0.3.0 布局契约(设计共识):频谱内容占据整个窗体,一切配置收进
-//! 顶栏 ⚙ 菜单;全屏时顶栏自动隐藏(鼠标贴顶部 8px 浮现),ESC 或
-//! 右键退出全屏。设置经 `music_spec_app` lib 持久化(ron/惯例目录/
-//! 300ms 防抖)。
+//! 原生菜单栏(macOS)/右键菜单承担;全屏时 ESC 或右键退出。设置经
+//! `music_spec_app` lib 持久化(ron/惯例目录/300ms 防抖)。
 //!
 //! Threading model (ADR-0002): the audio callback writes the ring buffer
 //! inside `music-spec-capture`; this UI thread pops samples, runs the FFT and
@@ -137,7 +136,7 @@ impl SpectrumApp {
             .or_else(|| system.default_source(SourceKind::Input));
         let status = match &source {
             Some(s) => format!("打开 {}…", s.name),
-            None => "未找到可用声源,请在 ⚙ 菜单中选择".to_string(),
+            None => "未找到可用声源,请从菜单栏选择".to_string(),
         };
         let band_count = settings.band_count;
         let decay: DecaySpeed = settings.decay.into();
@@ -492,7 +491,6 @@ impl eframe::App for SpectrumApp {
                 }
                 self.draw_hover(ui, plot);
                 self.draw_overlays(ui, full, &status, running);
-                self.draw_settings_chip(ui, full);
             });
 
         // 非 macOS:右键菜单作为配置入口(macOS 由原生菜单承担)。
@@ -843,40 +841,6 @@ impl SpectrumApp {
             );
             painter.rect_filled(rect.expand(6.0), 4.0, chip);
             painter.galley(rect.min, galley, AXIS_TEXT);
-        }
-    }
-
-    /// 右上角 ⚙ 浮钮:配置入口的最后保证(全平台;悬浮,不占画布)。
-    fn draw_settings_chip(&mut self, ui: &mut egui::Ui, full: Rect) {
-        let chip = Rect::from_min_size(
-            Pos2::new(full.right() - 44.0, full.top() + 10.0),
-            egui::vec2(34.0, 26.0),
-        );
-        let painter = ui.painter_at(full);
-        painter.rect_filled(
-            chip,
-            6.0,
-            Color32::from_rgba_unmultiplied_const(12, 14, 19, 150),
-        );
-        let hover = chip.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or_default());
-        painter.text(
-            chip.center(),
-            Align2::CENTER_CENTER,
-            "⚙",
-            FontId::proportional(15.0),
-            if hover {
-                Color32::WHITE
-            } else {
-                Color32::from_rgb(120, 128, 145)
-            },
-        );
-        let response = ui.interact(
-            chip,
-            egui::Id::unique("settings_chip"),
-            egui::Sense::click(),
-        );
-        if response.clicked() {
-            self.settings_open = true;
         }
     }
 
