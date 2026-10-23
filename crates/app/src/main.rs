@@ -380,6 +380,11 @@ impl eframe::App for SpectrumApp {
             if i.key_pressed(egui::Key::Comma) && i.modifiers.command {
                 self.settings_open = true;
             }
+            // F11:全屏切换(仅窗口激活时收到,天然满足「窗口激活」语义)。
+            if i.key_pressed(egui::Key::F11) {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!self.fullscreen));
+            }
         });
 
         // 全屏状态同步(兼容系统按钮进入的全屏)+ 退出:
@@ -398,6 +403,16 @@ impl eframe::App for SpectrumApp {
         {
             if self.native_menu.is_none() {
                 self.native_menu = NativeMenu::install();
+                if std::env::var_os("MUSIC_SPEC_DEBUG").is_some() {
+                    eprintln!(
+                        "[menu] install: {}",
+                        if self.native_menu.is_some() {
+                            "ok"
+                        } else {
+                            "FAILED"
+                        }
+                    );
+                }
             }
             let commands: Vec<MenuCommand> = match self.native_menu.as_mut() {
                 None => Vec::new(),
@@ -475,6 +490,7 @@ impl eframe::App for SpectrumApp {
                 }
                 self.draw_hover(ui, plot);
                 self.draw_overlays(ui, full, &status, running);
+                self.draw_settings_chip(ui, full);
             });
 
         // 非 macOS:右键菜单作为配置入口(macOS 由原生菜单承担)。
@@ -825,6 +841,40 @@ impl SpectrumApp {
             );
             painter.rect_filled(rect.expand(6.0), 4.0, chip);
             painter.galley(rect.min, galley, AXIS_TEXT);
+        }
+    }
+
+    /// 右上角 ⚙ 浮钮:配置入口的最后保证(全平台;悬浮,不占画布)。
+    fn draw_settings_chip(&mut self, ui: &mut egui::Ui, full: Rect) {
+        let chip = Rect::from_min_size(
+            Pos2::new(full.right() - 44.0, full.top() + 10.0),
+            egui::vec2(34.0, 26.0),
+        );
+        let painter = ui.painter_at(full);
+        painter.rect_filled(
+            chip,
+            6.0,
+            Color32::from_rgba_unmultiplied_const(12, 14, 19, 150),
+        );
+        let hover = chip.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or_default());
+        painter.text(
+            chip.center(),
+            Align2::CENTER_CENTER,
+            "⚙",
+            FontId::proportional(15.0),
+            if hover {
+                Color32::WHITE
+            } else {
+                Color32::from_rgb(120, 128, 145)
+            },
+        );
+        let response = ui.interact(
+            chip,
+            egui::Id::unique("settings_chip"),
+            egui::Sense::click(),
+        );
+        if response.clicked() {
+            self.settings_open = true;
         }
     }
 
