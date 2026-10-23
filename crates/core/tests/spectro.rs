@@ -3,7 +3,7 @@
 //! axis — ADR-0003). Pure computation; time is a parameter, so tests are
 //! headless.
 
-use music_spec_core::Spectrograph;
+use audio_spectrum_core::Spectrograph;
 
 fn bands(num: usize, value: f32) -> Vec<f32> {
     vec![value; num]

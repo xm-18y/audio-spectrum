@@ -18,7 +18,7 @@ use objc2_app_kit::{
 use objc2_foundation::NSObject;
 use objc2_foundation::NSString;
 
-use music_spec_capture::DeviceInfo;
+use audio_spectrum_capture::DeviceInfo;
 
 use crate::ViewMode;
 
@@ -55,7 +55,7 @@ const TAG_SOURCE: isize = 1000;
 
 define_class!(
     #[unsafe(super(NSObject))]
-    #[name = "MusicSpecMenuHandler"]
+    #[name = "AudioSpectrumMenuHandler"]
     #[ivars = Shared]
     struct MenuHandler;
 
@@ -205,7 +205,7 @@ impl NativeMenu {
         let app_menu = NSMenu::new(mtm);
         app_menu.addItem(&standard_item(
             mtm,
-            "关于 music-spec",
+            "关于 audio-spectrum",
             sel!(orderFrontStandardAboutPanel:),
             None,
         ));
@@ -220,7 +220,7 @@ impl NativeMenu {
         app_menu.addItem(&NSMenuItem::separatorItem(mtm));
         app_menu.addItem(&standard_item(
             mtm,
-            "隐藏 music-spec",
+            "隐藏 audio-spectrum",
             sel!(hide:),
             Some("h"),
         ));
@@ -233,7 +233,7 @@ impl NativeMenu {
         app_menu.addItem(&NSMenuItem::separatorItem(mtm));
         app_menu.addItem(&standard_item(
             mtm,
-            "退出 music-spec",
+            "退出 audio-spectrum",
             sel!(terminate:),
             Some("q"),
         ));
@@ -244,7 +244,7 @@ impl NativeMenu {
             NSEventModifierFlags::Command.union(NSEventModifierFlags::Option),
         );
         let app_item = NSMenuItem::new(mtm);
-        app_item.setTitle(&ns_str("music-spec"));
+        app_item.setTitle(&ns_str("audio-spectrum"));
         app_item.setSubmenu(Some(&app_menu));
 
         // 主菜单

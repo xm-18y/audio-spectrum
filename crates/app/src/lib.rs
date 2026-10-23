@@ -1,8 +1,8 @@
-//! music-spec-app 的纯逻辑层:设置中枢、主题合成、背景图数学。
+//! audio-spectrum-app 的纯逻辑层:设置中枢、主题合成、背景图数学。
 //!
 //! 与窗口/渲染解耦:bin(egui 壳)消费这些类型与函数;全部行为可在
 //! 无 GPU 环境下测试。持久化契约:ron 文本、平台惯例目录
-//! (`dirs::config_dir()/music-spec/settings.ron`)、损坏或缺失时静默
+//! (`dirs::config_dir()/audio-spectrum/settings.ron`)、损坏或缺失时静默
 //! 回默认值(陪伴应用零打扰原则,设计共识 v0.3.0)。
 
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ pub enum ViewMode {
     Spectrogram,
 }
 
-/// 衰减速度档位(持久化形态;运行时映射到 `music_spec_core::DecaySpeed`)。
+/// 衰减速度档位(持久化形态;运行时映射到 `audio_spectrum_core::DecaySpeed`)。
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum DecayChoice {
     Slow,
@@ -33,22 +33,22 @@ pub enum DecayChoice {
     Fast,
 }
 
-impl From<DecayChoice> for music_spec_core::DecaySpeed {
+impl From<DecayChoice> for audio_spectrum_core::DecaySpeed {
     fn from(c: DecayChoice) -> Self {
         match c {
-            DecayChoice::Slow => music_spec_core::DecaySpeed::Slow,
-            DecayChoice::Medium => music_spec_core::DecaySpeed::Medium,
-            DecayChoice::Fast => music_spec_core::DecaySpeed::Fast,
+            DecayChoice::Slow => audio_spectrum_core::DecaySpeed::Slow,
+            DecayChoice::Medium => audio_spectrum_core::DecaySpeed::Medium,
+            DecayChoice::Fast => audio_spectrum_core::DecaySpeed::Fast,
         }
     }
 }
 
-impl From<music_spec_core::DecaySpeed> for DecayChoice {
-    fn from(d: music_spec_core::DecaySpeed) -> Self {
+impl From<audio_spectrum_core::DecaySpeed> for DecayChoice {
+    fn from(d: audio_spectrum_core::DecaySpeed) -> Self {
         match d {
-            music_spec_core::DecaySpeed::Slow => DecayChoice::Slow,
-            music_spec_core::DecaySpeed::Medium => DecayChoice::Medium,
-            music_spec_core::DecaySpeed::Fast => DecayChoice::Fast,
+            audio_spectrum_core::DecaySpeed::Slow => DecayChoice::Slow,
+            audio_spectrum_core::DecaySpeed::Medium => DecayChoice::Medium,
+            audio_spectrum_core::DecaySpeed::Fast => DecayChoice::Fast,
         }
     }
 }
@@ -357,13 +357,13 @@ pub fn blur_rgba(pixels: &mut [[u8; 4]], width: usize, height: usize, radius: us
 /// 颜色 = 调色板背景色向柱渐变色按强度混合;`bg_on` 时 alpha 随强度
 /// (静音透明,透出背景图),否则不透明。
 pub fn spectro_pixels(
-    sg: &music_spec_core::Spectrograph,
+    sg: &audio_spectrum_core::Spectrograph,
     pal: &Palette,
     bg_on: bool,
 ) -> Vec<[u8; 4]> {
     let bands = sg.num_bands();
-    let count = music_spec_core::SPECTRO_COLUMN_COUNT;
-    let span = music_spec_core::DB_CEILING - music_spec_core::DB_FLOOR;
+    let count = audio_spectrum_core::SPECTRO_COLUMN_COUNT;
+    let span = audio_spectrum_core::DB_CEILING - audio_spectrum_core::DB_FLOOR;
     let mut out = Vec::with_capacity(count * bands);
     for band in (0..bands).rev() {
         for x in 0..count {
@@ -371,8 +371,8 @@ pub fn spectro_pixels(
             let db = sg
                 .column(age)
                 .map(|c| c[band])
-                .unwrap_or(music_spec_core::DB_FLOOR);
-            let t = ((db - music_spec_core::DB_FLOOR) / span).clamp(0.0, 1.0);
+                .unwrap_or(audio_spectrum_core::DB_FLOOR);
+            let t = ((db - audio_spectrum_core::DB_FLOOR) / span).clamp(0.0, 1.0);
             let hot = band_color(pal, t);
             let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
             let alpha = if bg_on { (t * 255.0) as u8 } else { 255 };
@@ -432,7 +432,17 @@ impl Default for Settings {
 
 /// 平台惯例配置目录(`~/Library/Application Support` / `%APPDATA%` / `~/.config`)。
 pub fn config_dir() -> Option<std::path::PathBuf> {
-    dirs::config_dir().map(|d| d.join("music-spec"))
+    dirs::config_dir().map(|d| d.join("audio-spectrum"))
+}
+
+/// 一次性迁移:应用更名前(music-spec)的旧配置,搬入新目录。
+/// 目标已存在或旧文件缺失时为空操作。
+pub fn migrate_settings(old: &Path, new: &Path) {
+    if new.exists() || !old.exists() {
+        return;
+    }
+    let settings = load_from(old);
+    let _ = save_to(&settings, new);
 }
 
 /// 配置文件路径;`None` 表示该平台无法定位配置目录。
@@ -458,9 +468,15 @@ pub fn save_to(settings: &Settings, path: &Path) -> std::io::Result<()> {
     std::fs::write(path, text)
 }
 
-/// 默认路径的读取便捷封装。
+/// 默认路径的读取便捷封装(含一次性别名迁移)。
 pub fn load() -> Settings {
-    settings_path().map(|p| load_from(&p)).unwrap_or_default()
+    let Some(path) = settings_path() else {
+        return Settings::default();
+    };
+    if let Some(old_dir) = dirs::config_dir().map(|d| d.join("music-spec")) {
+        migrate_settings(&old_dir.join("settings.ron"), &path);
+    }
+    load_from(&path)
 }
 
 /// 默认路径的保存便捷封装。

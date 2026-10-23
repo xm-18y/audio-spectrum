@@ -4,7 +4,7 @@
 //! claim is that a 2048-point real FFT costs "tens of microseconds", so the
 //! UI thread can afford it every frame.
 
-use music_spec_core::{Analyzer, FRAME_SIZE, SAMPLE_RATE, Smoother};
+use audio_spectrum_core::{Analyzer, FRAME_SIZE, SAMPLE_RATE, Smoother};
 use std::f32::consts::TAU;
 use std::time::{Duration, Instant};
 

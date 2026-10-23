@@ -96,7 +96,7 @@ pub(crate) fn open_loopback(source: &DeviceInfo) -> Result<CaptureStream, Captur
     let stream: Retained<SCStream> = unsafe {
         SCStream::initWithFilter_configuration_delegate(SCStream::alloc(), &filter, &config, None)
     };
-    let queue = DispatchQueue::new("music-spec.sck.audio", None);
+    let queue = DispatchQueue::new("audio-spectrum.sck.audio", None);
 
     unsafe {
         let output: Retained<ProtocolObject<dyn SCStreamOutput>> =
@@ -179,7 +179,7 @@ pub(crate) struct SckSession {
 
 define_class!(
     #[unsafe(super(NSObject))]
-    #[name = "MusicSpecSckAudioHandler"]
+    #[name = "AudioSpectrumSckAudioHandler"]
     #[ivars = HandlerIvars]
     struct AudioHandler;
 

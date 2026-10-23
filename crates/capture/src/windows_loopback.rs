@@ -82,7 +82,7 @@ pub(crate) fn open_loopback(source: &DeviceInfo) -> Result<CaptureStream, Captur
     let dead_thread = dead.clone();
 
     let thread = thread::Builder::new()
-        .name("music-spec-wasapi-loopback".into())
+        .name("audio-spectrum-wasapi-loopback".into())
         .spawn(move || {
             let result = run_loopback_thread(&id, prod, &stop_thread, &dead_thread);
             let _ = tx.send(result);

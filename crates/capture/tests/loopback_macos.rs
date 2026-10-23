@@ -7,7 +7,7 @@
 
 #![cfg(target_os = "macos")]
 
-use music_spec_capture::{CaptureSystem, SourceKind};
+use audio_spectrum_capture::{CaptureSystem, SourceKind};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -20,7 +20,7 @@ fn loopback_delivers_samples_while_system_plays() {
         return;
     }
 
-    let wav_path = "/tmp/music-spec-loopback-test.wav";
+    let wav_path = "/tmp/audio-spectrum-loopback-test.wav";
     std::fs::write(wav_path, sine_wav(440.0, 0.5, 5.0)).expect("write test wav");
 
     let mut player = Command::new("afplay")

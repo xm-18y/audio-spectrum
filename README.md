@@ -1,4 +1,4 @@
-# music-spec
+# audio-spectrum
 
 跨平台(Windows / macOS / Linux)实时音频频谱显示应用。领域术语见
 [GLOSSARY.md](GLOSSARY.md),架构决策见 [docs/adr/](docs/adr/)。
@@ -6,23 +6,23 @@
 ## 运行
 
 ```bash
-cargo run -p music-spec-app   # macOS 首次运行会请求麦克风权限
+cargo run -p audio-spectrum-app   # macOS 首次运行会请求麦克风权限
 # 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻,⌘, = 设置,
 # F11 = 全屏(仅 Windows/Linux;macOS 用 ⌘F),ESC 关窗/退全屏
 # 配置入口:原生菜单栏(macOS)/ 画布右键菜单(Windows/Linux);设置存于
-#   macOS ~/Library/Application Support/music-spec/settings.ron
-#   Windows %APPDATA%\music-spec\settings.ron · Linux ~/.config/music-spec/
+#   macOS ~/Library/Application Support/audio-spectrum/settings.ron
+#   Windows %APPDATA%\audio-spectrum\settings.ron · Linux ~/.config/audio-spectrum/
 scripts/bundle-macos.sh       # 打包 .app(Dock/启动台图标 + Info.plist + 麦克风用途声明)
-open target/release/music-spec.app
+open target/release/audio-spectrum.app
 cargo test                    # core 管线 9 个行为测试 + 性能预算断言 + SCK 实机集成
 cargo clippy --workspace --all-targets
 ```
 
 窗口图标(标题栏/任务栏)由 256px PNG 经 `include_bytes!` 编进二进制;
-macOS Dock/启动台图标由 bundle 脚本装配(`assets/music-spec.icns`)。
+macOS Dock/启动台图标由 bundle 脚本装配(`assets/audio-spectrum.icns`)。
 Windows/Linux 构建说明:Linux 需系统音频开发库 `libasound2-dev`(+ `pkg-config`);
 Windows 交叉检查可用 `rustup target add x86_64-pc-windows-msvc` +
-`cargo check --target x86_64-pc-windows-msvc -p music-spec-capture`。
+`cargo check --target x86_64-pc-windows-msvc -p audio-spectrum-capture`。
 
 ## 架构
 
@@ -59,12 +59,12 @@ crates/
   - **窗口置顶** toggle(陪伴场景钉在角落)
 - ✅ 输入采集(麦克风/线路输入):三平台,含设备选择与断线重连
 - ✅ Loopback(系统回环):三平台后端已实现
-  - macOS:ScreenCaptureKit,实机验证(集成测试:`cargo test -p music-spec-capture`)
+  - macOS:ScreenCaptureKit,实机验证(集成测试:`cargo test -p audio-spectrum-capture`)
   - Windows:WASAPI loopback,交叉编译验证(x86_64-pc-windows-msvc,待实机)
   - Linux:PulseAudio monitor(PipeWire 经兼容层),源码级验证(待 Linux 机器编译)
 - ✅ 频谱管线 + 平滑 + Peak Hold + 语谱历史 + 设置中枢:22 个测试全绿,clippy 零警告
 - ✅ 性能预算:已仪表化
-  - 自动断言:`cargo test -p music-spec-core --test perf`(实测 release 25.6µs/帧,
+  - 自动断言:`cargo test -p audio-spectrum-core --test perf`(实测 release 25.6µs/帧,
     帧预算 16.7ms 的 0.15%,验证 ADR-0002 的微秒级假设)
   - 运行时 HUD:顶栏实时显示「ms/帧 · fps · ≈% CPU」(帧耗时 EMA ≈ 60 帧)
   - 端到端延迟 < 50ms:受采集后端影响,需实机人工验收(轮询后端 10ms 周期)
@@ -81,7 +81,7 @@ GitHub Actions(`.github/workflows/build.yml`)三平台构建:
   其他分支 → run 级 Artifacts
 - 首次接入:
   ```bash
-  git remote add origin git@github.com:<你>/music-spec.git
+  git remote add origin git@github.com:<你>/audio-spectrum.git
   git push -u origin main
   ```
 

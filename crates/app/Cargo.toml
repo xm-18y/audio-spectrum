@@ -1,13 +1,13 @@
 [package]
-name = "music-spec-app"
+name = "audio-spectrum-app"
 version.workspace = true
 edition.workspace = true
-description = "music-spec: real-time audio spectrum display for Windows/macOS/Linux."
+description = "audio-spectrum: real-time audio spectrum display for Windows/macOS/Linux."
 
 [dependencies]
 eframe = { workspace = true }
-music-spec-core = { workspace = true }
-music-spec-capture = { workspace = true }
+audio-spectrum-core = { workspace = true }
+audio-spectrum-capture = { workspace = true }
 
 [dependencies.serde]
 version = "1"

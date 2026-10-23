@@ -1,4 +1,4 @@
-use music_spec_core::{Analyzer, DB_FLOOR, FRAME_SIZE, SAMPLE_RATE};
+use audio_spectrum_core::{Analyzer, DB_FLOOR, FRAME_SIZE, SAMPLE_RATE};
 
 #[test]
 fn silence_reads_floor_on_every_band() {
@@ -105,7 +105,7 @@ fn a_tone_at_440hz_is_local_to_its_band() {
     assert!(bands[analyzer.band_of(880.0)] < -25.0);
 }
 
-use music_spec_core::Smoother;
+use audio_spectrum_core::Smoother;
 
 /// The smoother must attack fast (bars jump up), release slowly (bars fall
 /// gently), and settle back to the floor.
@@ -198,7 +198,7 @@ fn band_edges_tile_the_axis() {
     assert!((last_hi - 20_000.0).abs() < 0.5, "last_hi {last_hi}");
 }
 
-use music_spec_core::DecaySpeed;
+use audio_spectrum_core::DecaySpeed;
 
 /// Faster decay must fall further within the same number of silent frames.
 #[test]

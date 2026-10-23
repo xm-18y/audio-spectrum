@@ -1,5 +1,5 @@
 [package]
-name = "music-spec-core"
+name = "audio-spectrum-core"
 version.workspace = true
 edition.workspace = true
 description = "Spectrum pipeline: PCM samples in, per-Band dBFS out. Pure computation, no I/O."

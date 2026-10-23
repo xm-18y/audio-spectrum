@@ -1,5 +1,5 @@
 [package]
-name = "music-spec-capture"
+name = "audio-spectrum-capture"
 version.workspace = true
 edition.workspace = true
 description = "Capture Backends: platform-specific Input / Loopback capture, normalized to f32/48kHz/mono."

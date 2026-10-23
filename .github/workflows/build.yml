@@ -71,8 +71,8 @@ jobs:
         run: |
           ./scripts/bundle-macos.sh
           mkdir -p dist
-          ditto -c -k --keepParent target/release/music-spec.app \
-            "dist/music-spec-${LABEL}-macos-arm64.zip"
+          ditto -c -k --keepParent target/release/audio-spectrum.app \
+            "dist/audio-spectrum-${LABEL}-macos-arm64.zip"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -80,9 +80,9 @@ jobs:
           LABEL: ${{ needs.prepare.outputs.version_label }}
         run: |
           mkdir dist
-          Copy-Item target/release/music-spec-app.exe dist/music-spec.exe
-          Compress-Archive -Path dist/music-spec.exe -DestinationPath "dist/music-spec-$env:LABEL-windows-x64.zip"
-          Remove-Item dist/music-spec.exe
+          Copy-Item target/release/audio-spectrum-app.exe dist/audio-spectrum.exe
+          Compress-Archive -Path dist/audio-spectrum.exe -DestinationPath "dist/audio-spectrum-$env:LABEL-windows-x64.zip"
+          Remove-Item dist/audio-spectrum.exe
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
@@ -90,12 +90,12 @@ jobs:
           LABEL: ${{ needs.prepare.outputs.version_label }}
         run: |
           mkdir -p dist
-          tar -czf "dist/music-spec-${LABEL}-linux-x64.tar.gz" -C target/release music-spec-app
+          tar -czf "dist/audio-spectrum-${LABEL}-linux-x64.tar.gz" -C target/release audio-spectrum-app
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: music-spec-${{ needs.prepare.outputs.version_label }}-${{ matrix.platform }}
+          name: audio-spectrum-${{ needs.prepare.outputs.version_label }}-${{ matrix.platform }}
           path: dist
 
       - name: Run summary
@@ -136,7 +136,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             LABEL="${{ needs.prepare.outputs.version_label }}"
             gh release create "$TAG" \
-              --title "music-spec ${TAG} (${LABEL})" \
+              --title "audio-spectrum ${TAG} (${LABEL})" \
               --notes "提交:\`${GITHUB_SHA}\`\n版本标签:\`${LABEL}\`\n运行记录:${REPO_URL}/actions/runs/${GITHUB_RUN_ID}" \
               dist/*
           else
@@ -144,7 +144,7 @@ jobs:
             TAG="latest"
             gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
             cat > notes.md <<EOF
-          ## music-spec 构建产物
+          ## audio-spectrum 构建产物
 
           - 提交:\`${GITHUB_SHA}\`
           - 运行记录:${REPO_URL}/actions/runs/${GITHUB_RUN_ID}
@@ -152,7 +152,7 @@ jobs:
           EOF
             gh release create "$TAG" \
               --prerelease \
-              --title "music-spec ${{ needs.prepare.outputs.version_label }}" \
+              --title "audio-spectrum ${{ needs.prepare.outputs.version_label }}" \
               --notes-file notes.md \
               dist/*
           fi

@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! music-spec-core — the Spectrum pipeline: PCM samples in, per-Band dBFS out.
+//! audio-spectrum-core — the Spectrum pipeline: PCM samples in, per-Band dBFS out.
 //!
 //! Pure computation: no I/O, no FFI, no UI, no threads. The public seam is
 //! [`Analyzer::analyze`] (one frame of samples → per-Band dBFS on the log

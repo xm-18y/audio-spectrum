@@ -7,8 +7,8 @@ version = "0.4.2"
 edition = "2024"
 
 [workspace.dependencies]
-music-spec-core = { path = "crates/core" }
-music-spec-capture = { path = "crates/capture" }
+audio-spectrum-core = { path = "crates/core" }
+audio-spectrum-capture = { path = "crates/capture" }
 realfft = "3.5"
 cpal = "0.18"
 ringbuf = "0.5"

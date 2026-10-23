@@ -4,14 +4,14 @@
 //! Tests run in parallel: every persistence case uses its own temp file
 //! (the global-path convenience wrappers are only exercised indirectly).
 
-use music_spec_app::{
+use audio_spectrum_app::{
     DecayChoice, Rect, ScaleMode, Settings, StyleSettings, ThemePreset, ViewMode, band_color,
     blur_rgba, fit_rects, load_from, resolve_palette, save_to,
 };
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "music-spec-test-{tag}-{}-{}.ron",
+        "audio-spectrum-test-{tag}-{}-{}.ron",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -138,4 +138,29 @@ fn blur_spreads_a_hot_pixel() {
     assert!(px[7][0] > 0, "vertical neighbor heated");
     assert_eq!(px[0][0], 0, "far corner untouched");
     assert_eq!(px[12][3], 255, "alpha preserved");
+}
+
+/// 更名迁移:旧目录的设置搬到新目录,目标已存在时不覆盖。
+#[test]
+fn migration_moves_old_settings_once() {
+    use audio_spectrum_app::migrate_settings;
+    let old = temp_path("migrate-old");
+    let new = temp_path("migrate-new");
+    let mut s = Settings::default();
+    s.style.theme = ThemePreset::Neon;
+    save_to(&s, &old).unwrap();
+
+    migrate_settings(&old, &new);
+    assert_eq!(load_from(&new).style.theme, ThemePreset::Neon, "迁移后可读");
+
+    // 目标已存在时不覆盖既有内容。
+    let mut newer = Settings::default();
+    newer.style.theme = ThemePreset::Magma;
+    save_to(&newer, &new).unwrap();
+    migrate_settings(&old, &new);
+    assert_eq!(
+        load_from(&new).style.theme,
+        ThemePreset::Magma,
+        "不得覆盖新目录的既有设置"
+    );
 }

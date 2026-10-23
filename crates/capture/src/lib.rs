@@ -1,5 +1,5 @@
 #![deny(unsafe_code)]
-//! music-spec-capture — platform audio Capture Backends.
+//! audio-spectrum-capture — platform audio Capture Backends.
 //!
 //! Contract: every backend delivers a continuous stream of mono f32 samples
 //! at [`TARGET_SAMPLE_RATE`]. Normalization (sample-format conversion,

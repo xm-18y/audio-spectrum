@@ -1,7 +1,7 @@
 //! 语谱渲染数据链(历史 → 像素)的无 GPU 验证。
 
-use music_spec_app::{StyleSettings, ThemePreset, resolve_palette, spectro_pixels};
-use music_spec_core::{DB_FLOOR, SPECTRO_COLUMN_COUNT, Spectrograph};
+use audio_spectrum_app::{StyleSettings, ThemePreset, resolve_palette, spectro_pixels};
+use audio_spectrum_core::{DB_FLOOR, SPECTRO_COLUMN_COUNT, Spectrograph};
 
 #[test]
 fn spectro_pixels_light_the_newest_column() {

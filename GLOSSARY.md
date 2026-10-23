@@ -1,4 +1,4 @@
-# music-spec
+# audio-spectrum
 
 A cross-platform (Windows/macOS/Linux) desktop application that displays the real-time frequency spectrum of audio being played or recorded on the machine.
 

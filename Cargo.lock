@@ -430,6 +430,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "audio-spectrum-app"
+version = "0.4.2"
+dependencies = [
+ "audio-spectrum-capture",
+ "audio-spectrum-core",
+ "dirs",
+ "eframe",
+ "image",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "rfd",
+ "ron",
+ "serde",
+]
+
+[[package]]
+name = "audio-spectrum-capture"
+version = "0.4.2"
+dependencies = [
+ "block2 0.6.2",
+ "cpal",
+ "dispatch2",
+ "libpulse-binding",
+ "objc2 0.6.5",
+ "objc2-core-audio-types",
+ "objc2-core-media",
+ "objc2-foundation 0.3.2",
+ "objc2-screen-capture-kit",
+ "ringbuf",
+ "windows",
+]
+
+[[package]]
+name = "audio-spectrum-core"
+version = "0.4.2"
+dependencies = [
+ "realfft",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1950,47 +1991,6 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
-]
-
-[[package]]
-name = "music-spec-app"
-version = "0.4.2"
-dependencies = [
- "dirs",
- "eframe",
- "image",
- "music-spec-capture",
- "music-spec-core",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "rfd",
- "ron",
- "serde",
-]
-
-[[package]]
-name = "music-spec-capture"
-version = "0.4.2"
-dependencies = [
- "block2 0.6.2",
- "cpal",
- "dispatch2",
- "libpulse-binding",
- "objc2 0.6.5",
- "objc2-core-audio-types",
- "objc2-core-media",
- "objc2-foundation 0.3.2",
- "objc2-screen-capture-kit",
- "ringbuf",
- "windows",
-]
-
-[[package]]
-name = "music-spec-core"
-version = "0.4.2"
-dependencies = [
- "realfft",
 ]
 
 [[package]]

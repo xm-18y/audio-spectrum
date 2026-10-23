@@ -25,7 +25,7 @@ use crate::{CaptureError, CaptureStream, DeviceInfo, FeedCtx, SourceKind, Stream
 /// Shown when no PulseAudio/PipeWire service answers.
 pub(crate) const NOTE: &str = "Loopback 不可用:未检测到 PulseAudio/PipeWire 服务";
 
-const APP_NAME: &str = "music-spec";
+const APP_NAME: &str = "audio-spectrum";
 const SETUP_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// f32le stereo frame size in bytes.
@@ -146,7 +146,7 @@ pub(crate) fn open_loopback(source: &DeviceInfo) -> Result<CaptureStream, Captur
             return Err("连接 PulseAudio 超时".into());
         }
 
-        let mut stream = Stream::new(&mut context, "music-spec-loopback", &REQUEST_SPEC, None)
+        let mut stream = Stream::new(&mut context, "audio-spectrum-loopback", &REQUEST_SPEC, None)
             .ok_or("无法创建记录流")?;
         stream
             .connect_record(Some(&source.id), None, Default::default())
@@ -181,7 +181,7 @@ pub(crate) fn open_loopback(source: &DeviceInfo) -> Result<CaptureStream, Captur
     let consumer = SendHandle((ml_arc.clone(), stream_arc.clone(), ctx_arc.clone()));
 
     let thread = thread::Builder::new()
-        .name("music-spec-pulse-loopback".into())
+        .name("audio-spectrum-pulse-loopback".into())
         .spawn(move || {
             let (ml_consumer, stream_consumer, ctx_consumer) = consumer.into_inner();
             let mut feed = FeedCtx::new(prod, crate::TARGET_SAMPLE_RATE, 2);

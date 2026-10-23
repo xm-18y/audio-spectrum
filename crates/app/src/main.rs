@@ -1,30 +1,30 @@
 #![forbid(unsafe_code)]
-//! music-spec-app — the egui shell of music-spec.
+//! audio-spectrum-app — the egui shell of audio-spectrum.
 //!
 //! v0.3.0 布局契约(设计共识):频谱内容占据整个窗体,一切配置收进
 //! 原生菜单栏(macOS)/右键菜单承担;全屏时 ESC 或右键退出。设置经
-//! `music_spec_app` lib 持久化(ron/惯例目录/300ms 防抖)。
+//! `audio_spectrum_app` lib 持久化(ron/惯例目录/300ms 防抖)。
 //!
 //! Threading model (ADR-0002): the audio callback writes the ring buffer
-//! inside `music-spec-capture`; this UI thread pops samples, runs the FFT and
+//! inside `audio-spectrum-capture`; this UI thread pops samples, runs the FFT and
 //! paints, at a constant repaint rate.
 
-use eframe::egui;
-use egui::{
-    Align2, Color32, FontId, Mesh, Pos2, Rect, Shape, Stroke, TextureHandle, TextureOptions,
-    TextureWrapMode,
-};
-use music_spec_app::{
+use audio_spectrum_app::{
     DecayChoice, Palette, ScaleMode, Settings, ThemePreset, ViewMode,
     band_color as palette_band_color, blur_rgba, fit_rects, load as load_settings, resolve_palette,
     save as save_settings, spectro_pixels,
 };
 #[cfg(target_os = "macos")]
-use music_spec_app::{MenuCommand, NativeMenu};
-use music_spec_capture::{CaptureError, CaptureStream, CaptureSystem, DeviceInfo, SourceKind};
-use music_spec_core::{
+use audio_spectrum_app::{MenuCommand, NativeMenu};
+use audio_spectrum_capture::{CaptureError, CaptureStream, CaptureSystem, DeviceInfo, SourceKind};
+use audio_spectrum_core::{
     Analyzer, DB_CEILING, DB_FLOOR, DecaySpeed, FRAME_SIZE, FREQ_MIN_HZ, SPECTRO_COLUMN_COUNT,
     Smoother, Spectrograph,
+};
+use eframe::egui;
+use egui::{
+    Align2, Color32, FontId, Mesh, Pos2, Rect, Shape, Stroke, TextureHandle, TextureOptions,
+    TextureWrapMode,
 };
 
 use std::path::PathBuf;
@@ -39,7 +39,7 @@ const FREQ_TICKS: &[f32] = &[
 const DB_TICKS: &[f32] = &[0.0, -20.0, -40.0, -60.0];
 
 /// Embedded at compile time so the binary has no runtime asset dependency.
-const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/icons/music-spec-256.png");
+const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/icons/audio-spectrum-256.png");
 
 const GRID: Color32 = Color32::from_rgb(36, 41, 52);
 const AXIS_TEXT: Color32 = Color32::from_rgb(108, 114, 130);
@@ -71,7 +71,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "music-spec",
+        "audio-spectrum",
         options,
         Box::new(move |cc| {
             cc.egui_ctx.set_visuals(egui::Visuals::dark());
@@ -966,7 +966,7 @@ impl SpectrumApp {
         let bg_rgb = Color32::from_rgb(pal.bg[0], pal.bg[1], pal.bg[2]);
         match (&self.bg_texture, self.settings.background.path.is_some()) {
             (Some(tex), true) => {
-                let dst = music_spec_app::Rect {
+                let dst = audio_spectrum_app::Rect {
                     pos: [full.min.x, full.min.y],
                     size: [full.width(), full.height()],
                 };
