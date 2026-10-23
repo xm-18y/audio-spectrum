@@ -264,27 +264,33 @@ pub struct Smoother {
 /// Per-frame decay pacing of the display values and Peak Hold.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DecaySpeed {
+    VerySlow,
     Slow,
     Medium,
     Fast,
+    VeryFast,
 }
 
 impl DecaySpeed {
     /// Fraction of the remaining gap closed on a falling frame.
     fn release(self) -> f32 {
         match self {
+            DecaySpeed::VerySlow => 0.008,
             DecaySpeed::Slow => 0.02,
             DecaySpeed::Medium => 0.05,
             DecaySpeed::Fast => 0.12,
+            DecaySpeed::VeryFast => 0.25,
         }
     }
 
     /// Peak Hold decay, dB per frame.
     fn peak_decay(self) -> f32 {
         match self {
+            DecaySpeed::VerySlow => 0.1,
             DecaySpeed::Slow => 0.2,
             DecaySpeed::Medium => 0.4,
             DecaySpeed::Fast => 0.8,
+            DecaySpeed::VeryFast => 1.6,
         }
     }
 }

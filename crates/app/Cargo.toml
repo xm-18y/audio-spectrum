@@ -5,9 +5,12 @@ edition.workspace = true
 description = "audio-spectrum: real-time audio spectrum display for Windows/macOS/Linux."
 
 [dependencies]
-eframe = { workspace = true }
+iced = { workspace = true, features = ["canvas", "image"] }
 audio-spectrum-core = { workspace = true }
 audio-spectrum-capture = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1"
 
 [dependencies.serde]
 version = "1"

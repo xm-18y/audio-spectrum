@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/core", "crates/capture", "crates/app"]
 
 [workspace.package]
-version = "0.4.2"
+version = "0.6.0"
 edition = "2024"
 
 [workspace.dependencies]
@@ -12,6 +12,6 @@ audio-spectrum-capture = { path = "crates/capture" }
 realfft = "3.5"
 cpal = "0.18"
 ringbuf = "0.5"
-eframe = "0.37"
+iced = "0.14"
 objc2-screen-capture-kit = "0.3.2"
 libpulse-binding = "2.30.1"

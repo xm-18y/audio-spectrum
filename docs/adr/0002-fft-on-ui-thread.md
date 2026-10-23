@@ -1,7 +1,8 @@
 # Spectrum FFT runs on the UI thread
 
 The spectrum pipeline (Hann window, 2048-point real FFT, Band aggregation,
-smoothing) executes on the egui UI thread once per rendered frame, reading the
+smoothing) executes on the UI thread once per rendered frame (egui in
+ADR-0002's day, now the iced shell's `Message::Frame` handler), reading the
 newest samples from the lock-free ring buffer. A 2048-point real FFT costs tens
 of microseconds against a 16.7ms frame budget, so a dedicated DSP worker thread
 would add synchronization machinery with no measurable benefit.

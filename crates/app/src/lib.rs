@@ -1,6 +1,6 @@
 //! audio-spectrum-app 的纯逻辑层:设置中枢、主题合成、背景图数学。
 //!
-//! 与窗口/渲染解耦:bin(egui 壳)消费这些类型与函数;全部行为可在
+//! 与窗口/渲染解耦:bin(iced 壳)消费这些类型与函数;全部行为可在
 //! 无 GPU 环境下测试。持久化契约:ron 文本、平台惯例目录
 //! (`dirs::config_dir()/audio-spectrum/settings.ron`)、损坏或缺失时静默
 //! 回默认值(陪伴应用零打扰原则,设计共识 v0.3.0)。
@@ -28,17 +28,43 @@ pub enum ViewMode {
 /// 衰减速度档位(持久化形态;运行时映射到 `audio_spectrum_core::DecaySpeed`)。
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum DecayChoice {
+    VerySlow,
     Slow,
     Medium,
     Fast,
+    VeryFast,
+}
+
+impl DecayChoice {
+    /// 菜单档位顺序(极慢 → 极快)。
+    pub const ALL: &'static [DecayChoice] = &[
+        DecayChoice::VerySlow,
+        DecayChoice::Slow,
+        DecayChoice::Medium,
+        DecayChoice::Fast,
+        DecayChoice::VeryFast,
+    ];
+
+    /// 菜单显示名。
+    pub fn name(self) -> &'static str {
+        match self {
+            DecayChoice::VerySlow => "极慢",
+            DecayChoice::Slow => "慢",
+            DecayChoice::Medium => "中",
+            DecayChoice::Fast => "快",
+            DecayChoice::VeryFast => "极快",
+        }
+    }
 }
 
 impl From<DecayChoice> for audio_spectrum_core::DecaySpeed {
     fn from(c: DecayChoice) -> Self {
         match c {
+            DecayChoice::VerySlow => audio_spectrum_core::DecaySpeed::VerySlow,
             DecayChoice::Slow => audio_spectrum_core::DecaySpeed::Slow,
             DecayChoice::Medium => audio_spectrum_core::DecaySpeed::Medium,
             DecayChoice::Fast => audio_spectrum_core::DecaySpeed::Fast,
+            DecayChoice::VeryFast => audio_spectrum_core::DecaySpeed::VeryFast,
         }
     }
 }
@@ -46,9 +72,11 @@ impl From<DecayChoice> for audio_spectrum_core::DecaySpeed {
 impl From<audio_spectrum_core::DecaySpeed> for DecayChoice {
     fn from(d: audio_spectrum_core::DecaySpeed) -> Self {
         match d {
+            audio_spectrum_core::DecaySpeed::VerySlow => DecayChoice::VerySlow,
             audio_spectrum_core::DecaySpeed::Slow => DecayChoice::Slow,
             audio_spectrum_core::DecaySpeed::Medium => DecayChoice::Medium,
             audio_spectrum_core::DecaySpeed::Fast => DecayChoice::Fast,
+            audio_spectrum_core::DecaySpeed::VeryFast => DecayChoice::VeryFast,
         }
     }
 }
@@ -122,7 +150,7 @@ impl ThemePreset {
     }
 }
 
-/// 一套渲染调色板(RGB,由 bin 转成 egui 颜色)。
+/// 一套渲染调色板(RGB,由 bin 转成 iced 颜色)。
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Palette {
     pub bar_bottom: [u8; 3],
@@ -238,7 +266,7 @@ impl Default for BackgroundSettings {
     }
 }
 
-/// 简单矩形(pos + size),lib 层无 egui 依赖。
+/// 简单矩形(pos + size),lib 层无 GUI 依赖。
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Rect {
     pub pos: [f32; 2],

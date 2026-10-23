@@ -8,8 +8,8 @@
 ```bash
 cargo run -p audio-spectrum-app   # macOS 首次运行会请求麦克风权限
 # 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻,⌘, = 设置,
-# F11 = 全屏(仅 Windows/Linux;macOS 用 ⌘F),ESC 关窗/退全屏
-# 配置入口:原生菜单栏(macOS)/ 画布右键菜单(Windows/Linux);设置存于
+# F11 = 全屏(仅 Windows/Linux;macOS 用 ⌘F),双击 = 全屏⇄窗口,ESC 关窗/退全屏
+# 配置入口:原生菜单栏(macOS)/ 应用菜单栏(Windows/Linux);设置存于
 #   macOS ~/Library/Application Support/audio-spectrum/settings.ron
 #   Windows %APPDATA%\audio-spectrum\settings.ron · Linux ~/.config/audio-spectrum/
 scripts/bundle-macos.sh       # 打包 .app(Dock/启动台图标 + Info.plist + 麦克风用途声明)
@@ -19,7 +19,10 @@ cargo clippy --workspace --all-targets
 ```
 
 窗口图标(标题栏/任务栏)由 256px PNG 经 `include_bytes!` 编进二进制;
-macOS Dock/启动台图标由 bundle 脚本装配(`assets/audio-spectrum.icns`)。
+Windows 程序文件图标(资源管理器)经 `build.rs` + `winresource` 嵌入
+多尺寸 `assets/icons/audio-spectrum.ico`(16–256px,构建期自动编译,
+同时写入 FileDescription/ProductVersion 元数据);macOS Dock/启动台
+图标由 bundle 脚本装配(`assets/audio-spectrum.icns`)。
 Windows/Linux 构建说明:Linux 需系统音频开发库 `libasound2-dev`(+ `pkg-config`);
 Windows 交叉检查可用 `rustup target add x86_64-pc-windows-msvc` +
 `cargo check --target x86_64-pc-windows-msvc -p audio-spectrum-capture`。
@@ -28,13 +31,14 @@ Windows 交叉检查可用 `rustup target add x86_64-pc-windows-msvc` +
 
 ```
 crates/
-├── core      纯函数频谱管线:samples → FFT(2048/realfft/Hann)→ Bin → Band 聚合
-│             (对数轴 20Hz–20kHz,取 max + 低频插值)→ dBFS;Smoother(快攻慢放
-│             + Peak Hold)。无 I/O、无 FFI,全部行为测试覆盖。
-├── capture   CaptureBackend:cpal 输入采集(三平台)+ 音频线程回调(只写环缓冲,
+├── core      纯函数频谱管线：samples → FFT(2048/realfft/Hann)→ Bin → Band 聚合
+│             (对数轴 20Hz–20kHz，取 max + 低频插值)→ dBFS；Smoother(快攻慢放
+│             + Peak Hold)。无 I/O、无 FFI，全部行为测试覆盖。
+├── capture   CaptureBackend：cpal 输入采集(三平台)+ 音频线程回调(只写环缓冲，
 │             ADR-0002)→ 归一化(f32 / 48kHz / 单声道)→ ringbuf SPSC。
-└── app       egui 壳:声源选择、断线自动 Reconnect、深色频谱画布(渐变柱 +
-             Peak Hold 线 + 频率/dB 网格)、常驻 60fps 重绘。
+└── app       iced 壳(Elm 架构)：声源选择、断线自动 Reconnect、深色频谱画布
+             (canvas：渐变柱 + Peak Hold 线 + 频率/dB 网格)、常驻 60fps 重绘
+             (画布在每次重绘请求时发布 Frame 消息，自维持 vsync 帧循环)。
 ```
 
 线程模型(ADR-0002):音频回调只写环缓冲,不分配不加锁;FFT 在 UI 线程每帧执行
@@ -42,10 +46,19 @@ crates/
 
 ## 状态
 
+- ✅ v0.6.0 应用菜单栏 + Windows Loopback 修复:非 macOS 取消右键菜单,
+  改为窗口顶部常驻应用菜单栏;视图菜单聚合视图/全屏/窗口(启动全屏、
+  置顶、记忆)/频段数(32–192 六档)/衰减速度(极慢—极快五档),
+  设置窗只剩 Peak Hold、网格、样式、背景图;左下状态浮层移除;绘图区
+  全出血铺满窗体(频率刻度内嵌底缘);双击主体内容切换全屏;修复背景图
+  遮挡频谱/语谱(iced canvas 同帧内图像
+  恒绘制在几何之上:背景图/语谱纹理拆为独立 canvas widget 层,经
+  stack 分层叠放,频谱主体在最上);Windows 后端修复两处导致 Loopback 永远不可用的缺陷
+  (枚举器 CLSID 写错 → REGDB_E_CLASSNOTREG;流启动后无就绪回报 →
+  打开必然超时)
 - ✅ v0.4.0 原生菜单与全幅画布:macOS 原生菜单栏(AppKit NSMenu:应用
   菜单/视图/动态声源,⌘, 设置);顶栏移除,频谱铺满窗体,状态降为
-  左下浮层(HUD 右下,默认关);设置改为独立滚动窗口;非 macOS 用
-  右键菜单;ESC 优先关窗、全屏时 ESC/右键退全屏
+  左下浮层(HUD 右下,默认关);设置改为独立滚动窗口
 - ✅ v0.3.0 个性化中枢:设置持久化(ron,`dirs` 平台惯例目录,300ms 防抖,
   损坏静默回默认)——样式主题(5 预设 + 逐槽颜色覆盖/圆角/间隙/网格)、
   背景图(选择/缩放 填满·适应·平铺/不透明度/预烘焙模糊)、窗口(默认
@@ -96,5 +109,15 @@ GitHub Actions(`.github/workflows/build.yml`)三平台构建:
   同样记录在 macos.rs 注释里。
 - WASAPI/PulseAudio 后端在专用线程上 10ms 轮询取包(与 SCK 回调等价的
   “只写环缓冲”不变量);COM/Pulse 锁均隔离在采集线程内。
-- Smoother 系数按 60fps 标定,高刷新率屏幕上衰减会略快(纯视觉,可接受)。
-- egui 无内置 CJK 字形,启动时加载系统 CJK 字体;找不到则中文回退为方框。
+- Smoother 系数按 60fps 标定，高刷新率屏幕上衰减会略快(纯视觉，可接受)。
+- 文本渲染用 iced/cosmic-text 的系统字体库：主字体指平台 CJK 家族
+  (微软雅黑/PingFang/Noto CJK)并注册候选字体字节作字形回退后备，找不到时
+  逐字形回退，中文不会变方框(与旧 egui 壳手装字体的行为等价)。
+- iced 壳的已知取舍(相对旧 egui 壳)：
+  - 设置窗的颜色覆盖用「色板 + 十六进制输入 + ↺ 重置」代替原生取色器；
+  - 非 macOS 应用菜单栏为扁平下拉(无子菜单,声源直接列出);
+  - 全屏状态经 250ms 节流回读 `window::mode` 同步(兼容系统绿色按钮)，
+    绿色按钮进入全屏的勾选态可能滞后至多 250ms；
+  - 键盘快捷键只在无文本输入框抢占键盘时生效(输入十六进制色值时 S/Space
+    照常输入，不触发切换；iced 0.14 的按钮不接键盘焦点，点击按钮后
+    快捷键不受影响)。
