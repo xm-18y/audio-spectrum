@@ -1056,39 +1056,26 @@ impl SpectrumApp {
                     }
                 }
                 painter.add(Shape::mesh(mesh));
-                if rounding > 0.0 && bottom - bar_top > 2.0 * rounding + 1.0 {
-                    // 顶部圆角:帽体完全位于柱内(旧实现半悬在柱顶上方,
-                    // 衰减时会像小方块一样骑柱滑落——v0.4.2 修复)。
-                    // 颜色与渐变顶端顶点同色,接缝不可见。
-                    let cap_r = rounding.round().clamp(0.0, 255.0) as u8;
-                    painter.rect_filled(
-                        Rect::from_min_max(
-                            Pos2::new(x0, bar_top),
-                            Pos2::new(x1, bar_top + 2.0 * rounding),
-                        ),
-                        egui::CornerRadius {
-                            nw: cap_r,
-                            ne: cap_r,
-                            sw: 0,
-                            se: 0,
-                        },
-                        band_color(pal, 1.0),
-                    );
-                }
             }
             let peak = self.last_peaks[i];
             if peak > DB_FLOOR + 0.5 {
+                // 峰值保持块:悬于柱子上方——底边对齐峰值电平,衰减慢于
+                // 柱体(PEAK_DECAY < RELEASE 视觉),形成经典拖尾帽。
                 let py = db_to_y(peak, top, h);
-                painter.line_segment(
-                    [Pos2::new(x0, py), Pos2::new(x1, py)],
-                    Stroke::new(
-                        1.5,
-                        Color32::from_rgba_unmultiplied(
-                            peak_color.r(),
-                            peak_color.g(),
-                            peak_color.b(),
-                            210,
-                        ),
+                let r = rounding.round().clamp(0.0, 2.0) as u8;
+                painter.rect_filled(
+                    Rect::from_min_max(Pos2::new(x0, py - 4.0), Pos2::new(x1, py)),
+                    egui::CornerRadius {
+                        nw: r,
+                        ne: r,
+                        sw: r,
+                        se: r,
+                    },
+                    Color32::from_rgba_unmultiplied(
+                        peak_color.r(),
+                        peak_color.g(),
+                        peak_color.b(),
+                        225,
                     ),
                 );
             }
