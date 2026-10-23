@@ -221,3 +221,27 @@ fn decay_speed_paces_the_release() {
         "fast decay must fall further: fast {fast_v} slow {slow_v}"
     );
 }
+
+/// 峰值帽永不沉入柱体:柱体按剩余距离比例下落(release),峰帽按固定
+/// dB/帧衰减——音频回落到中间电平并持续时,旧实现中峰帽会衰减得比
+/// 柱体还快,被柱子追上沉入柱内(视觉上"帽出现在柱子里")。
+#[test]
+fn peak_cap_never_sinks_below_the_displayed_bar() {
+    let mut s = Smoother::new(2, true);
+    s.process(&[0.0, 0.0]);
+    for _ in 0..40 {
+        s.process(&[-5.0, -5.0]); // 稳态:柱体与峰帽都收敛到 -5
+    }
+    // 音频小幅回落到 -7:柱体按剩余距离的 5%/帧下探(每帧 ~0.1dB),
+    // 峰帽固定 0.4dB/帧 衰减——比柱子还快,会沉入柱内。
+    for frame in 0..30 {
+        let out = s.process(&[-7.0, -7.0]);
+        assert!(
+            out.peaks[0] >= out.bands[0] - 1e-4,
+            "第 {} 帧:峰帽 {} 沉到了柱顶 {} 之下",
+            frame,
+            out.peaks[0],
+            out.bands[0]
+        );
+    }
+}

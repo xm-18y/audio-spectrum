@@ -323,8 +323,11 @@ impl Smoother {
                 self.decay.release()
             };
             self.bands[i] = cur + coef * (t - cur);
+            // 峰值帽钳制:不得低于当前显示柱顶——柱体按剩余距离比例下落
+            // (小回落时每帧仅 ~0.1dB),峰帽固定 dB/帧衰减会反超沉入柱内。
             self.peaks[i] = if self.peak_hold {
                 t.max(self.peaks[i] - self.decay.peak_decay())
+                    .max(self.bands[i])
             } else {
                 self.bands[i]
             };
