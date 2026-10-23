@@ -20,6 +20,8 @@ use music_spec_app::{
     band_color as palette_band_color, blur_rgba, fit_rects, load as load_settings, resolve_palette,
     save as save_settings, spectro_pixels,
 };
+#[cfg(target_os = "macos")]
+use music_spec_app::{MenuCommand, NativeMenu};
 use music_spec_capture::{CaptureError, CaptureStream, CaptureSystem, DeviceInfo, SourceKind};
 use music_spec_core::{
     Analyzer, DB_CEILING, DB_FLOOR, DecaySpeed, FRAME_SIZE, FREQ_MIN_HZ, SPECTRO_COLUMN_COUNT,
@@ -46,8 +48,6 @@ const STATUS_OK: Color32 = Color32::from_rgb(96, 200, 128);
 const STATUS_WARN: Color32 = Color32::from_rgb(232, 180, 96);
 /// 设置防抖落盘间隔。
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
-/// 全屏时,鼠标贴顶多少像素内顶栏浮现。
-const TOP_BAR_REVEAL_PX: f32 = 8.0;
 
 fn main() -> eframe::Result {
     let settings = load_settings();
@@ -99,6 +99,11 @@ struct SpectrumApp {
     last_frame_at: Option<f64>,
     /// 全部持久化设置(唯一事实源)。
     settings: Settings,
+    /// 设置窗开关(原生菜单 ⌘, / 右键菜单打开)。
+    settings_open: bool,
+    /// macOS 原生菜单(首帧安装)。
+    #[cfg(target_os = "macos")]
+    native_menu: Option<NativeMenu>,
     /// 冻结显示(Space):分析继续,画面与滚动停止。瞬态,不持久化。
     frozen: bool,
     /// 视口是否全屏(每帧从视口信息同步,兼容系统绿色按钮)。
@@ -151,6 +156,9 @@ impl SpectrumApp {
             frame_interval_ms: 16.7,
             last_frame_at: None,
             settings,
+            settings_open: false,
+            #[cfg(target_os = "macos")]
+            native_menu: None,
             frozen: false,
             fullscreen: false,
             settings_dirty: None,
@@ -357,7 +365,7 @@ impl eframe::App for SpectrumApp {
 
         let now = ui.input(|i| i.time);
 
-        // 键盘:S 切换 频谱/语谱,Space 冻结/解冻(设计共识)。
+        // 键盘:S 切换 频谱/语谱,Space 冻结/解冻,⌘,/Ctrl+, 设置(设计共识)。
         ui.input(|i| {
             if i.key_pressed(egui::Key::S) {
                 self.settings.view = match self.settings.view {
@@ -369,16 +377,49 @@ impl eframe::App for SpectrumApp {
             if i.key_pressed(egui::Key::Space) {
                 self.frozen = !self.frozen;
             }
+            if i.key_pressed(egui::Key::Comma) && i.modifiers.command {
+                self.settings_open = true;
+            }
         });
 
-        // 全屏状态同步(兼容系统按钮进入的全屏)+ 退出(ESC/右键)。
+        // 全屏状态同步(兼容系统按钮进入的全屏)+ 退出:
+        // ESC 优先关设置窗(非全屏时);全屏时 ESC/右键(macOS)退出。
         self.fullscreen = ui.input(|i| i.viewport().fullscreen).unwrap_or(false);
-        if self.fullscreen {
-            let exit =
-                ui.input(|i| i.key_pressed(egui::Key::Escape) || i.pointer.secondary_clicked());
-            if exit {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if self.fullscreen && (esc || ui.input(|i| i.pointer.secondary_clicked())) {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        } else if esc && self.settings_open && !self.fullscreen {
+            self.settings_open = false;
+        }
+
+        // macOS 原生菜单:首帧安装,每帧轮询命令、同步勾选、重建声源。
+        #[cfg(target_os = "macos")]
+        {
+            if self.native_menu.is_none() {
+                self.native_menu = NativeMenu::install();
+            }
+            let commands: Vec<MenuCommand> = match self.native_menu.as_mut() {
+                None => Vec::new(),
+                Some(menu) => {
+                    menu.rebuild_sources(
+                        &self.loopback_devices,
+                        &self.input_devices,
+                        self.source.as_ref().map(|d| d.id.as_str()),
+                    );
+                    let polled = menu.poll();
+                    menu.sync(
+                        self.settings.view,
+                        self.fullscreen,
+                        self.settings.always_on_top,
+                        self.frozen,
+                        self.settings.show_hud,
+                    );
+                    polled
+                }
+            };
+            for cmd in commands {
+                self.apply_menu_command(cmd, ui.ctx());
             }
         }
 
@@ -417,43 +458,12 @@ impl eframe::App for SpectrumApp {
         let loopback_devices = self.loopback_devices.clone();
         let input_devices = self.input_devices.clone();
 
-        // 顶栏:全屏时自动隐藏,鼠标贴顶浮现(设计共识 v0.3.0)。
-        let show_top = !self.fullscreen
-            || ui
-                .input(|i| i.pointer.latest_pos())
-                .is_some_and(|p| p.y < TOP_BAR_REVEAL_PX);
-        if show_top {
-            egui::Panel::top("top_bar").show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.strong("music-spec");
-                    if self.frozen {
-                        ui.colored_label(STATUS_WARN, "⏸ 已冻结");
-                    }
-                    if running {
-                        ui.colored_label(STATUS_OK, status);
-                    } else {
-                        ui.colored_label(STATUS_WARN, status);
-                    }
-
-                    // Performance HUD: live evidence for the design budget
-                    // (60 fps, < 5% single-core CPU; see README).
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.weak(format!(
-                            "{:.2}ms/帧 · {:.0}fps · ≈{:.1}% CPU",
-                            self.frame_cost_ms,
-                            1000.0 / self.frame_interval_ms.max(0.001),
-                            100.0 * self.frame_cost_ms / self.frame_interval_ms
-                        ));
-                        self.settings_menu(ui, &loopback_devices, &input_devices, &loop_note);
-                    });
-                });
-            });
-        }
-
+        // 频谱占满整个窗体(设计共识 v0.4.0):无顶栏;
+        // 状态与 HUD 为画布左下/右下浮层,配置走原生菜单/右键菜单/设置窗。
         let panel_frame = egui::Frame::new()
             .inner_margin(0)
             .fill(Color32::TRANSPARENT);
-        egui::CentralPanel::default()
+        let panel = egui::CentralPanel::default()
             .frame(panel_frame)
             .show(ui, |ui| {
                 let plot = self.plot_rect(ui);
@@ -464,7 +474,27 @@ impl eframe::App for SpectrumApp {
                     ViewMode::Spectrogram => self.draw_spectrogram(ui, plot, &palette, bg_on),
                 }
                 self.draw_hover(ui, plot);
+                self.draw_overlays(ui, full, &status, running);
             });
+
+        // 非 macOS:右键菜单作为配置入口(macOS 由原生菜单承担)。
+        #[cfg(not(target_os = "macos"))]
+        panel.response.context_menu(|ui| {
+            self.context_menu(ui, &loopback_devices, &input_devices, &loop_note)
+        });
+        #[cfg(target_os = "macos")]
+        let _ = &panel;
+
+        // 设置窗(⌘, / 原生菜单 / 右键菜单打开;可滚动,不常驻)。
+        let mut settings_open = self.settings_open;
+        egui::Window::new("设置")
+            .open(&mut settings_open)
+            .default_size([380.0, 500.0])
+            .vscroll(true)
+            .show(ui.ctx(), |ui| {
+                self.settings_ui(ui, &loopback_devices, &input_devices, &loop_note);
+            });
+        self.settings_open = settings_open;
 
         // HUD statistics: EMA over ~60 frames.
         let cost_ms = frame_start.elapsed().as_secs_f64() * 1000.0;
@@ -480,15 +510,15 @@ impl eframe::App for SpectrumApp {
 }
 
 impl SpectrumApp {
-    /// ⚙ 菜单:一切配置(设计共识 v0.3.0:频谱占满窗体)。
-    fn settings_menu(
+    /// 设置窗内容(v0.4.0:窗口承载,可滚动,不常驻)。
+    fn settings_ui(
         &mut self,
         ui: &mut egui::Ui,
         loopback_devices: &[DeviceInfo],
         input_devices: &[DeviceInfo],
         loop_note: &str,
     ) {
-        ui.menu_button("⚙", |ui| {
+        {
             // ---- 声源 ----
             ui.weak("声源 · Loopback(系统回环)");
             if loopback_devices.is_empty() {
@@ -718,7 +748,148 @@ impl SpectrumApp {
                     self.mark_dirty();
                 }
             });
+        }
+    }
+    /// 应用原生菜单命令(macOS)。
+    #[cfg(target_os = "macos")]
+    fn apply_menu_command(&mut self, cmd: MenuCommand, ctx: &egui::Context) {
+        match cmd {
+            MenuCommand::OpenSettings => self.settings_open = true,
+            MenuCommand::SetView(v) => {
+                self.settings.view = v;
+                self.mark_dirty();
+            }
+            MenuCommand::ToggleFullscreen => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!self.fullscreen));
+            }
+            MenuCommand::ToggleAlwaysOnTop => {
+                self.settings.always_on_top = !self.settings.always_on_top;
+                let level = if self.settings.always_on_top {
+                    egui::WindowLevel::AlwaysOnTop
+                } else {
+                    egui::WindowLevel::Normal
+                };
+                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+                self.mark_dirty();
+            }
+            MenuCommand::ToggleFrozen => self.frozen = !self.frozen,
+            MenuCommand::ToggleHud => {
+                self.settings.show_hud = !self.settings.show_hud;
+                self.mark_dirty();
+            }
+            MenuCommand::SelectSource(info) => {
+                self.source = Some(info);
+                self.switch_source();
+            }
+        }
+    }
+
+    /// 左下状态浮层 + 右下性能 HUD(默认关;原生菜单可开)。
+    fn draw_overlays(&self, ui: &mut egui::Ui, full: Rect, status: &str, running: bool) {
+        let painter = ui.painter_at(full);
+        let chip = Color32::from_rgba_unmultiplied_const(12, 14, 19, 160);
+
+        let status_text = if self.frozen {
+            format!("⏸ 已冻结 · {status}")
+        } else {
+            status.to_string()
+        };
+        let status_color = if running { STATUS_OK } else { STATUS_WARN };
+        let galley = painter.layout(
+            status_text,
+            FontId::proportional(11.0),
+            status_color,
+            f32::INFINITY,
+        );
+        let rect = Rect::from_min_size(
+            Pos2::new(full.left() + 12.0, full.bottom() - galley.size().y - 10.0),
+            galley.size(),
+        );
+        painter.rect_filled(rect.expand(6.0), 4.0, chip);
+        painter.galley(rect.min, galley, status_color);
+
+        if self.settings.show_hud {
+            let text = format!(
+                "{:.2}ms/帧 · {:.0}fps · ≈{:.1}% CPU",
+                self.frame_cost_ms,
+                1000.0 / self.frame_interval_ms.max(0.001),
+                100.0 * self.frame_cost_ms / self.frame_interval_ms
+            );
+            let galley = painter.layout(text, FontId::monospace(10.0), AXIS_TEXT, f32::INFINITY);
+            let rect = Rect::from_min_size(
+                Pos2::new(
+                    full.right() - galley.size().x - 12.0,
+                    full.bottom() - galley.size().y - 10.0,
+                ),
+                galley.size(),
+            );
+            painter.rect_filled(rect.expand(6.0), 4.0, chip);
+            painter.galley(rect.min, galley, AXIS_TEXT);
+        }
+    }
+
+    /// 非 macOS 的右键菜单(macOS 由原生菜单栏承担)。
+    #[cfg(not(target_os = "macos"))]
+    fn context_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        loopback_devices: &[DeviceInfo],
+        input_devices: &[DeviceInfo],
+        loop_note: &str,
+    ) {
+        ui.menu_button("视图", |ui| {
+            let mut view = self.settings.view;
+            ui.selectable_value(&mut view, ViewMode::Spectrum, "频谱");
+            ui.selectable_value(&mut view, ViewMode::Spectrogram, "语谱");
+            if view != self.settings.view {
+                self.settings.view = view;
+                self.mark_dirty();
+            }
+            ui.separator();
+            ui.toggle_value(&mut self.frozen, "冻结显示");
+            if ui
+                .toggle_value(&mut self.settings.always_on_top, "窗口置顶")
+                .changed()
+            {
+                let level = if self.settings.always_on_top {
+                    egui::WindowLevel::AlwaysOnTop
+                } else {
+                    egui::WindowLevel::Normal
+                };
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+                self.mark_dirty();
+            }
+            if ui
+                .toggle_value(&mut self.settings.show_hud, "性能信息")
+                .changed()
+            {
+                self.mark_dirty();
+            }
         });
+        ui.menu_button("声源", |ui| {
+            if loopback_devices.is_empty() && input_devices.is_empty() {
+                ui.weak(loop_note);
+            }
+            for (devices, label) in [(loopback_devices, "Loopback"), (input_devices, "Input")] {
+                if devices.is_empty() {
+                    continue;
+                }
+                ui.weak(label);
+                for info in devices {
+                    if ui
+                        .selectable_value(&mut self.source, Some(info.clone()), &info.name)
+                        .changed()
+                    {
+                        self.switch_source();
+                    }
+                }
+            }
+        });
+        ui.separator();
+        if ui.button("设置…").clicked() {
+            self.settings_open = true;
+        }
     }
 }
 

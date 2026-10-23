@@ -7,8 +7,8 @@
 
 ```bash
 cargo run -p music-spec-app   # macOS 首次运行会请求麦克风权限
-# 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻;ESC/右键 = 退出全屏
-# ⚙ 菜单:声源/视图/显示/样式/背景/窗口;设置存于
+# 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻,⌘, = 设置;ESC 关窗/退全屏
+# macOS:原生菜单栏(视图/声源);Windows/Linux:画布右键菜单;设置存于
 #   macOS ~/Library/Application Support/music-spec/settings.ron
 #   Windows %APPDATA%\music-spec\settings.ron · Linux ~/.config/music-spec/
 scripts/bundle-macos.sh       # 打包 .app(Dock/启动台图标 + Info.plist + 麦克风用途声明)
@@ -41,6 +41,10 @@ crates/
 
 ## 状态
 
+- ✅ v0.4.0 原生菜单与全幅画布:macOS 原生菜单栏(AppKit NSMenu:应用
+  菜单/视图/动态声源,⌘, 设置);顶栏移除,频谱铺满窗体,状态降为
+  左下浮层(HUD 右下,默认关);设置改为独立滚动窗口;非 macOS 用
+  右键菜单;ESC 优先关窗、全屏时 ESC/右键退全屏
 - ✅ v0.3.0 个性化中枢:设置持久化(ron,`dirs` 平台惯例目录,300ms 防抖,
   损坏静默回默认)——样式主题(5 预设 + 逐槽颜色覆盖/圆角/间隙/网格)、
   背景图(选择/缩放 填满·适应·平铺/不透明度/预烘焙模糊)、窗口(默认

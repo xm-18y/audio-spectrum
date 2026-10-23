@@ -8,6 +8,12 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+mod macos_menu;
+#[cfg(target_os = "macos")]
+pub use macos_menu::{MenuCommand, NativeMenu};
+
 // ---------------------------------------------------------------------------
 // 视图 / 衰减
 // ---------------------------------------------------------------------------
@@ -400,6 +406,8 @@ pub struct Settings {
     pub default_fullscreen: bool,
     /// 记住上次窗口尺寸与位置。
     pub remember_window: bool,
+    /// 显示性能 HUD(右下角浮层;默认关闭,纯视觉)。
+    pub show_hud: bool,
     /// 上次窗口矩形 [x, y, w, h]。
     pub window_rect: Option<[f32; 4]>,
 }
@@ -416,6 +424,7 @@ impl Default for Settings {
             background: BackgroundSettings::default(),
             default_fullscreen: false,
             remember_window: false,
+            show_hud: false,
             window_rect: None,
         }
     }
