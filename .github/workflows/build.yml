@@ -81,7 +81,7 @@ jobs:
         run: |
           mkdir dist
           Copy-Item target/release/music-spec-app.exe dist/music-spec.exe
-          Compress-Archive -Path dist/music-spec.exe -DestinationPath "dist/$env:LABEL-windows-x64.zip"
+          Compress-Archive -Path dist/music-spec.exe -DestinationPath "dist/music-spec-$env:LABEL-windows-x64.zip"
           Remove-Item dist/music-spec.exe
 
       - name: Package (Linux)
