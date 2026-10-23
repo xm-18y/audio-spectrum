@@ -89,8 +89,20 @@ jobs:
         env:
           LABEL: ${{ needs.prepare.outputs.version_label }}
         run: |
+          # 捆绑包:二进制 + freedesktop 集成(桌面入口 + hicolor 图标)
+          # + 用户级安装脚本(ELF 无资源段,图标经 desktop 文件生效)。
+          mkdir -p audio-spectrum
+          cp target/release/audio-spectrum-app audio-spectrum/audio-spectrum
+          cp assets/linux/audio-spectrum.desktop audio-spectrum/
+          cp assets/linux/install.sh audio-spectrum/
+          for size in 16 32 64 128 256 512; do
+            dir="audio-spectrum/icons/hicolor/${size}x${size}/apps"
+            mkdir -p "${dir}"
+            cp "assets/icons/audio-spectrum-${size}.png" "${dir}/audio-spectrum.png"
+          done
           mkdir -p dist
-          tar -czf "dist/audio-spectrum-${LABEL}-linux-x64.tar.gz" -C target/release audio-spectrum-app
+          tar -czf "dist/audio-spectrum-${LABEL}-linux-x64.tar.gz" audio-spectrum
+          rm -rf audio-spectrum
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

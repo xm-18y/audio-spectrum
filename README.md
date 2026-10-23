@@ -22,7 +22,9 @@ cargo clippy --workspace --all-targets
 Windows 程序文件图标(资源管理器)经 `build.rs` + `winresource` 嵌入
 多尺寸 `assets/icons/audio-spectrum.ico`(16–256px,构建期自动编译,
 同时写入 FileDescription/ProductVersion 元数据);macOS Dock/启动台
-图标由 bundle 脚本装配(`assets/audio-spectrum.icns`)。
+图标由 bundle 脚本装配(`assets/audio-spectrum.icns`);Linux 捆包
+含 freedesktop 集成(桌面入口 + hicolor 图标 + `install.sh`,装入
+`~/.local`,ELF 无资源段,图标经 desktop 文件生效)。
 Windows/Linux 构建说明:Linux 需系统音频开发库 `libasound2-dev`(+ `pkg-config`);
 Windows 交叉检查可用 `rustup target add x86_64-pc-windows-msvc` +
 `cargo check --target x86_64-pc-windows-msvc -p audio-spectrum-capture`。

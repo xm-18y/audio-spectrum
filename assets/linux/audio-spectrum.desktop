@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=audio-spectrum
+GenericName=Audio Spectrum Display
+Comment=实时频谱显示(系统回环 / 麦克风)
+Exec=audio-spectrum
+Icon=audio-spectrum
+Terminal=false
+Categories=AudioVideo;Audio;
+StartupNotify=false
+StartupWMClass=audio-spectrum
