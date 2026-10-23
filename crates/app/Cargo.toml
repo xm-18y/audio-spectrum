@@ -8,3 +8,21 @@ description = "music-spec: real-time audio spectrum display for Windows/macOS/Li
 eframe = { workspace = true }
 music-spec-core = { workspace = true }
 music-spec-capture = { workspace = true }
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[dependencies.ron]
+version = "0.12"
+
+[dependencies.dirs]
+version = "7"
+
+[dependencies.rfd]
+version = "0.17"
+
+[dependencies.image]
+version = "0.25"
+default-features = false
+features = ["png", "jpeg"]
