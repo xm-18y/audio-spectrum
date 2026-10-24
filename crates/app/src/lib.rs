@@ -731,18 +731,20 @@ pub fn blur_rgba(pixels: &mut [[u8; 4]], width: usize, height: usize, radius: us
 // 语谱像素
 // ---------------------------------------------------------------------------
 
-/// 语谱纹理像素(行主序:行 = Band,顶部 = 高频;列 = 时间,右 = 最新)。
-/// 颜色 = 调色板背景色向柱渐变色按强度混合;`bg_on` 时 alpha 随强度
-/// (静音透明,透出背景图),否则不透明。
+/// 语谱纹理像素(扁平 RGBA8,行主序:行 = Band,顶部 = 高频;列 = 时间,
+/// 右 = 最新)。颜色 = 调色板背景色向柱渐变色按强度混合;`bg_on` 时 alpha
+/// 随强度(静音透明,透出背景图),否则不透明。
+///
+/// 直接写扁平 RGBA,避免「`Vec<[u8;4]>` 再整体展开」的额外分配与拷贝。
 pub fn spectro_pixels(
     sg: &audio_spectrum_core::Spectrograph,
     pal: &Palette,
     bg_on: bool,
-) -> Vec<[u8; 4]> {
+) -> Vec<u8> {
     let bands = sg.num_bands();
     let count = audio_spectrum_core::SPECTRO_COLUMN_COUNT;
     let span = audio_spectrum_core::DB_CEILING - audio_spectrum_core::DB_FLOOR;
-    let mut out = Vec::with_capacity(count * bands);
+    let mut out = Vec::with_capacity(count * bands * 4);
     for band in (0..bands).rev() {
         for x in 0..count {
             let age = count - 1 - x;
@@ -754,7 +756,7 @@ pub fn spectro_pixels(
             let hot = band_color(pal, t);
             let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
             let alpha = if bg_on { (t * 255.0) as u8 } else { 255 };
-            out.push([
+            out.extend_from_slice(&[
                 mix(pal.bg[0], hot[0]),
                 mix(pal.bg[1], hot[1]),
                 mix(pal.bg[2], hot[2]),

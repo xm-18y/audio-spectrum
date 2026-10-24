@@ -174,6 +174,9 @@ pub struct Spectrograph {
     pending: Vec<f32>,
     /// Window start of the open interval; `None` until the first frame.
     window_start: Option<f64>,
+    /// Monotonic counter, bumped whenever a column closes. Lets the UI
+    /// cache the rendered texture and skip rebuilding unchanged frames.
+    revision: u64,
 }
 
 impl Spectrograph {
@@ -185,7 +188,13 @@ impl Spectrograph {
             filled: 0,
             pending: vec![DB_FLOOR; num_bands],
             window_start: None,
+            revision: 0,
         }
+    }
+
+    /// Bumped whenever the visible history changes (a column closes).
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn num_bands(&self) -> usize {
@@ -248,6 +257,7 @@ impl Spectrograph {
         slot.copy_from_slice(&self.pending);
         self.head = (self.head + 1) % SPECTRO_COLUMN_COUNT;
         self.filled = (self.filled + 1).min(SPECTRO_COLUMN_COUNT);
+        self.revision += 1;
     }
 }
 

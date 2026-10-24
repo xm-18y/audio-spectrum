@@ -46,6 +46,7 @@ use iced::window;
 use iced_aw::ColorPicker;
 use iced::{Color, Element, Font, Length, Padding, Pixels, Point, Rectangle, Size, Subscription, Task, Theme, Vector};
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -85,6 +86,11 @@ const BTN_BG: Color = Color::from_rgb(0.13, 0.15, 0.19);
 const BTN_FG: Color = Color::from_rgb(0.85, 0.87, 0.92);
 const SECTION_FG: Color = Color::from_rgb(0.55, 0.58, 0.66);
 const DIM_OVERLAY: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.5);
+
+/// 大图解码的像素上限:超出此长边立即降采样,避免全分辨率 RGBA 常驻。
+/// 背景按窗口覆盖绘制 2560 足够;封面只是中心小圆贴图,1024 足够。
+const BG_MAX_EDGE: u32 = 2560;
+const COVER_MAX_EDGE: u32 = 1024;
 
 /// 设置防抖落盘间隔。
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -299,6 +305,8 @@ struct SpectrumApp {
     analyzer: Analyzer,
     smoother: Smoother,
     spectrograph: Spectrograph,
+    /// 语谱纹理缓存:版本/频段/背景/调色板不变时复用上一帧纹理。
+    spectro_cache: RefCell<SpectroCache>,
     target: Vec<f32>,
     last_bands: Vec<f32>,
     last_peaks: Vec<f32>,
@@ -400,6 +408,7 @@ impl SpectrumApp {
             analyzer: Analyzer::new(band_count),
             smoother,
             spectrograph: Spectrograph::new(band_count),
+            spectro_cache: RefCell::new(SpectroCache::default()),
             target: vec![DB_FLOOR; band_count],
             last_bands: vec![DB_FLOOR; band_count],
             last_peaks: vec![DB_FLOOR; band_count],
@@ -618,7 +627,7 @@ impl SpectrumApp {
                 if path_changed || self.bg_raw.is_none() {
                     match image::open(path) {
                         Ok(img) => {
-                            let rgba = img.to_rgba8();
+                            let rgba = downscale_to_edge(img, BG_MAX_EDGE).to_rgba8();
                             let (w, h) = rgba.dimensions();
                             let pixels: Vec<[u8; 4]> = rgba
                                 .into_raw()
@@ -645,6 +654,11 @@ impl SpectrumApp {
                 self.bg_src_size = [w as f32, h as f32];
                 let flat: Vec<u8> = pixels.into_iter().flatten().collect();
                 self.bg_handle = Some(ImageHandle::from_rgba(w as u32, h as u32, flat));
+                // 无模糊时原图副本只服务于本次烘焙,随即释放(省一份整图常驻);
+                // 之后开启模糊会重新解码一次,此后拖动滑块复用原图。
+                if want_blur == 0 {
+                    self.bg_raw = None;
+                }
             }
         }
     }
@@ -955,6 +969,22 @@ impl Default for ParticlePool {
             items: Vec::new(),
         }
     }
+}
+
+/// 语谱纹理缓存键:历史版本 + 频段数 + 背景模式 + 调色板。
+/// 四者任一变化才重建 RGBA 与 GPU 纹理;冻结/无新列时零成本复用。
+#[derive(PartialEq)]
+struct SpectroKey {
+    revision: u64,
+    bands: usize,
+    bg_on: bool,
+    palette: Palette,
+}
+
+#[derive(Default)]
+struct SpectroCache {
+    key: Option<SpectroKey>,
+    handle: Option<ImageHandle>,
 }
 
 struct Star {
@@ -1387,7 +1417,7 @@ impl SpectrumApp {
         };
         match decoded {
             Some(img) => {
-                let rgba = img.to_rgba8();
+                let rgba = downscale_to_edge(img, COVER_MAX_EDGE).to_rgba8();
                 let (w, h) = rgba.dimensions();
                 let pixels: Vec<[u8; 4]> = rgba
                     .into_raw()
@@ -1415,6 +1445,18 @@ impl SpectrumApp {
             None => self.cover_handle = None,
         }
     }
+}
+
+/// 长边超过 `max_edge` 时按比例降采样;小图原样返回。
+fn downscale_to_edge(img: image::DynamicImage, max_edge: u32) -> image::DynamicImage {
+    let (w, h) = (img.width(), img.height());
+    if w <= max_edge && h <= max_edge {
+        return img;
+    }
+    let scale = max_edge as f32 / w.max(h) as f32;
+    let nw = ((w as f32 * scale).round() as u32).max(1);
+    let nh = ((h as f32 * scale).round() as u32).max(1);
+    img.resize_exact(nw, nh, image::imageops::FilterType::Triangle)
 }
 
 /// 圆形封面蒙版:圆外 alpha 归零,边缘 2px 线性羽化。加载时一次性烘焙,
@@ -1949,16 +1991,29 @@ fn view(app: &SpectrumApp) -> Element<'_, Message> {
     let palette = resolve_palette(&app.settings.style);
     let bg_on = app.bg_handle.is_some();
 
-    // 语谱纹理:每帧重建 RGBA(600×96 ≈ 230KB,预算内;见 README HUD)。
-    let spectro = (app.settings.view == ViewMode::Spectrogram).then(|| {
-        let pixels = spectro_pixels(&app.spectrograph, &palette, bg_on);
-        let flat: Vec<u8> = pixels.into_iter().flatten().collect();
-        ImageHandle::from_rgba(
-            SPECTRO_COLUMN_COUNT as u32,
-            app.settings.band_count as u32,
-            flat,
-        )
-    });
+    // 语谱纹理:仅在历史版本/频段/背景/调色板变化时重建并上传;
+    // 冻结或尚未产生新列时直接复用上一帧纹理(省掉 230KB 分配与整图上传)。
+    let spectro = if app.settings.view == ViewMode::Spectrogram {
+        let key = SpectroKey {
+            revision: app.spectrograph.revision(),
+            bands: app.settings.band_count,
+            bg_on,
+            palette,
+        };
+        let mut cache = app.spectro_cache.borrow_mut();
+        if cache.key.as_ref() != Some(&key) {
+            let flat = spectro_pixels(&app.spectrograph, &palette, bg_on);
+            cache.handle = Some(ImageHandle::from_rgba(
+                SPECTRO_COLUMN_COUNT as u32,
+                key.bands as u32,
+                flat,
+            ));
+            cache.key = Some(key);
+        }
+        cache.handle.clone()
+    } else {
+        None
+    };
 
     // 频谱占据菜单栏以下的整个窗体:状态与 HUD 为画布左下/右下浮层,
     // 配置走应用菜单栏(非 macOS)/原生菜单(macOS)/设置窗。

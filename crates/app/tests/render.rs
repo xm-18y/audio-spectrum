@@ -17,19 +17,19 @@ fn spectro_pixels_light_the_newest_column() {
     });
 
     // 不透明模式:静音历史 = 背景色,最新列有能量。
+    // 扁平 RGBA:每像素 4 字节,列 = 时间(右最新),行 = Band。
     let px = spectro_pixels(&sg, &pal, false);
-    assert_eq!(px.len(), SPECTRO_COLUMN_COUNT * bands);
-    let newest_top = px[SPECTRO_COLUMN_COUNT - 1];
-    assert_eq!(newest_top[3], 255, "opaque mode keeps alpha");
-    let silent = px[0];
-    assert_eq!(silent[0], pal.bg[0], "silent history stays at bg color");
-    assert_ne!(newest_top[0], silent[0], "newest column carries energy");
+    assert_eq!(px.len(), SPECTRO_COLUMN_COUNT * bands * 4);
+    let newest = (SPECTRO_COLUMN_COUNT - 1) * 4;
+    assert_eq!(px[newest + 3], 255, "opaque mode keeps alpha");
+    assert_eq!(px[0], pal.bg[0], "silent history stays at bg color");
+    assert_ne!(px[newest], px[0], "newest column carries energy");
 
     // 背景模式:静音 alpha = 0(透出背景图),响亮列 alpha > 0。
     let px = spectro_pixels(&sg, &pal, true);
-    assert_eq!(px[0][3], 0, "silence is transparent over background");
+    assert_eq!(px[3], 0, "silence is transparent over background");
     assert!(
-        px[SPECTRO_COLUMN_COUNT - 1][3] > 200,
+        px[newest + 3] > 200,
         "full-scale stays visible"
     );
 }
