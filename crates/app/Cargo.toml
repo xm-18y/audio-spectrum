@@ -10,6 +10,11 @@ audio-spectrum-core = { workspace = true }
 audio-spectrum-capture = { workspace = true }
 iced_aw = { version = "0.14.1", features = ["color_picker"] }
 
+# 更新包解压:纯 Rust 实现,不依赖系统 unzip/Expand-Archive/tar 命令。
+zip = { version = "9.1.0", default-features = false, features = ["deflate"] }
+tar = "0.4.46"
+flate2 = "1.1.10"
+
 # 构建脚本按宿主平台编译,故 winresource 必须无条件声明(纯 Rust,
 # 非 Windows 宿主仅编译不调用);嵌入逻辑由 build.rs 内的目标平台检查守卫。
 [build-dependencies]

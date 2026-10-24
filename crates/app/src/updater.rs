@@ -3,7 +3,8 @@
 //! 线程模型与 ADR-0002 同思路:后台 `std::thread` 做全部 I/O(HTTP、
 //! 解压、换装),事件经 `std::sync::mpsc` 送回;UI 线程每帧 `try_recv`
 //! 轮询(`SpectrumApp::poll_update`)。纯逻辑(版本比较、资产匹配)为
-//! 无 I/O 函数,单测覆盖;HTTP/解压依赖 `ureq`(rustls)+ 系统命令。
+//! 无 I/O 函数,单测覆盖;HTTP 依赖 `ureq`(rustls),解压用 `zip`/`tar`
+//! 纯 Rust 实现,无需系统工具。
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
@@ -240,38 +241,29 @@ fn download_to(
     Ok(())
 }
 
-/// 按平台调用系统自带解压(zip:PowerExpand-Archive/unzip;tar.gz:tar)。
+/// 按资产扩展名解压(zip 或 tar.gz),全部在进程内完成,
+/// 不依赖系统 unzip / Expand-Archive / tar 命令。
 fn extract(archive: &Path, dest: &Path) -> Result<(), String> {
-    let status = match std::env::consts::OS {
-        "windows" => std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                &format!(
-                    "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
-                    archive.display(),
-                    dest.display()
-                ),
-            ])
-            .status(),
-        "macos" => std::process::Command::new("unzip")
-            .args(["-o", "-q"])
-            .arg(archive)
-            .arg("-d")
-            .arg(dest)
-            .status(),
-        _ => std::process::Command::new("tar")
-            .args(["-xzf"])
-            .arg(archive)
-            .arg("-C")
-            .arg(dest)
-            .status(),
-    };
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!("解压失败(退出码 {s})")),
-        Err(e) => Err(format!("解压工具不可用:{e}")),
+    let is_zip = archive
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"));
+    if is_zip {
+        extract_zip(archive, dest)
+    } else {
+        extract_tar_gz(archive, dest)
     }
+}
+
+fn extract_zip(archive: &Path, dest: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(archive).map_err(|e| format!("无法读取压缩包:{e}"))?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("解析 zip 失败:{e}"))?;
+    zip.extract(dest).map_err(|e| format!("解压失败:{e}"))
+}
+
+fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(archive).map_err(|e| format!("无法读取压缩包:{e}"))?;
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    tar.unpack(dest).map_err(|e| format!("解压失败:{e}"))
 }
 
 /// 在解压产物中定位新版可执行文件:
