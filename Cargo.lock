@@ -318,7 +318,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "audio-spectrum-app"
-version = "0.8.4"
+version = "0.8.5"
 dependencies = [
  "audio-spectrum-capture",
  "audio-spectrum-core",
@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "audio-spectrum-capture"
-version = "0.8.4"
+version = "0.8.5"
 dependencies = [
  "block2 0.6.2",
  "cpal",
@@ -360,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "audio-spectrum-core"
-version = "0.8.4"
+version = "0.8.5"
 dependencies = [
  "realfft",
 ]
