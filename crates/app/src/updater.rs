@@ -169,7 +169,7 @@ fn asset_url_ok(info: &ReleaseInfo) -> bool {
 
 fn http_get(url: &str) -> Result<String, String> {
     ureq::get(url)
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(30))
         .call()
         .map_err(|e| format!("网络请求失败:{e}"))?
         .into_string()
@@ -208,7 +208,7 @@ fn download_to(
     progress: &impl Fn(u64, u64),
 ) -> Result<(), String> {
     let resp = ureq::get(&info.asset_url)
-        .timeout(std::time::Duration::from_secs(600))
+        .timeout(std::time::Duration::from_secs(1800))
         .call()
         .map_err(|e| format!("下载失败:{e}"))?;
     let total = resp
