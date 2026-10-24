@@ -135,8 +135,10 @@ crates/
 
 GitHub Actions(`.github/workflows/build.yml`)三平台构建:
 
-- **触发方式**:推送 `v*` 格式的 tag(如 `git tag v0.2.0 && git push origin v0.2.0`),
-  构建完成后自动在该 tag 上创建正式 Release 并上传三平台产物
+- **触发方式**:推送 `v*` 格式的 tag,构建完成后自动在该 tag 上创建正式
+  Release 并上传三平台产物;发布可直接用 `cargo run -p xtask -- release [版本号]`
+  (版本号缺省取自根 `Cargo.toml` 的 workspace 版本,自动校验工作区干净
+  与 tag 不重复,并把当前分支与新 tag 一并推送)
 - **矩阵**:macOS arm64(`.app` zip)、Windows x64(zip)、Linux x64(tar.gz),
   含 `cargo test` 与性能预算断言(CI 无音频硬件时自动跳过 SCK 实机集成测试)
 - **产物命名**:`audio-spectrum-v<版本>-<UTC日期>-<平台>.zip/tar.gz`
