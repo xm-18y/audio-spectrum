@@ -74,14 +74,15 @@ crates/
 
 - ✅ v0.7.0 关于/检测更新双窗口 + 应用内更新:菜单栏末尾「关于」下拉含
   「关于」「检测更新」两个子项(macOS 为原生菜单「关于 audio-spectrum /
-  检查更新…」),各自打开独立窗口——关于窗:程序图标、名称-版本号
+  检测更新…」),各自打开独立窗口——关于窗:程序图标、名称-版本号
   纵向水平居中,下方开源地址与程序说明;检测更新窗:启动时自动检测,
   有新版时菜单「关于」右上角显示红点,窗内显示「当前版本 → 最新
-  版本」+「更新」按钮 → 下载(实时进度条)→「立即安装」按钮 → 自动
-  换装重启;更新源为 GitHub Releases(资产命名对齐 CI 三平台产物),
+  版本」+「更新」按钮 → 下载(实时进度条)→ 完成即自动换装重启
+  (零确认);更新源为 GitHub Releases(资产命名对齐 CI 三平台产物),
   版本号按 semver 比较(同版本重建不提示);换装采用「旧版改名 .old
   让位 → 新版就位 → 拉起新进程」(macOS .app 整包替换),启动时自动
-  清理残留,失败回滚并可重试
+  清理残留,失败回滚并可重试。术语与决策见 GLOSSARY.md Updater 节与
+  docs/adr/0004
 
 - ✅ v0.6.0 应用菜单栏 + Windows Loopback 修复:非 macOS 取消右键菜单,
   改为窗口顶部常驻应用菜单栏;视图菜单聚合视图/全屏/窗口(启动全屏、
@@ -150,6 +151,8 @@ GitHub Actions(`.github/workflows/build.yml`)三平台构建:
     macOS 以 `open` 拉起新包,裸二进制( cargo run )直接 spawn。
   - 检查走未鉴权 GitHub API(60 次/时/IP):启动自动检测一次 + 手动
     检查,足够使用;检测线程异常退出时状态机回 Idle,可重新发起。
+  - 下载产物不做 SHA256 校验:HTTPS 传输完整性对当前威胁模型足够;
+    若要加,CI 需先发布 .sha256 摘要。
 - 设备身份:macOS 用 SCK 伪设备“系统音频输出”;Windows 用 WASAPI 端点 ID;
   Linux 用 PulseAudio monitor source 名;设备列表每秒轮询刷新。
 - macOS 26 的 SCStreamConfiguration 已无 `capturesCurrentAudioOutput`(13–15 的

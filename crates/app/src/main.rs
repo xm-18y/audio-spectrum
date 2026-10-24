@@ -160,8 +160,6 @@ enum Message {
     CloseUpdate,
     CheckUpdates,
     DownloadUpdate,
-    /// 安装已下载的新版(立即安装)。
-    InstallUpdate,
 }
 
 /// 应用菜单栏的顶层菜单(非 macOS)。
@@ -328,7 +326,7 @@ impl SpectrumApp {
     fn update_pending(&self) -> bool {
         matches!(
             self.update_phase,
-            UpdatePhase::Available(_) | UpdatePhase::Downloading { .. } | UpdatePhase::Ready(_)
+            UpdatePhase::Available(_) | UpdatePhase::Downloading { .. }
         )
     }
 
@@ -378,9 +376,11 @@ impl SpectrumApp {
             UpdateEvent::Progress { received, total } => {
                 self.update_phase = UpdatePhase::Downloading { received, total }
             }
-            // 下载完成:进入待安装态,由用户在更新窗点「立即安装」。
+            // 下载完成:立即换装重启(设计共识:零确认;失败回滚留在本进程)。
             UpdateEvent::Downloaded(path) => {
-                self.update_phase = UpdatePhase::Ready(path);
+                if let Err(e) = updater::install(&path) {
+                    self.update_phase = UpdatePhase::Failed(e);
+                }
             }
             UpdateEvent::Failed(e) => self.update_phase = UpdatePhase::Failed(e),
         }
@@ -937,15 +937,6 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
                 let total = info.asset_size;
                 app.update_phase = UpdatePhase::Downloading { received: 0, total };
                 app.update_rx = Some(updater::spawn_download(info));
-            }
-            Task::none()
-        }
-        Message::InstallUpdate => {
-            if let UpdatePhase::Ready(path) = app.update_phase.clone() {
-                match updater::install(&path) {
-                    Ok(()) => {} // install 内部已拉起新进程并退出
-                    Err(e) => app.update_phase = UpdatePhase::Failed(e),
-                }
             }
             Task::none()
         }
@@ -2003,8 +1994,8 @@ fn about_overlay(app: &SpectrumApp) -> Element<'_, Message> {
     window_card(col)
 }
 
-/// 「检测更新」窗口:当前版本 → 最新版本、更新按钮、下载进度、
-/// 下载完成后的「立即安装」;启动已自动检测,亦可手动重新检查。
+/// 「检测更新」窗口:当前版本 → 最新版本、更新按钮、下载进度(完成后
+/// 自动换装重启);启动已自动检测,亦可手动重新检查。
 fn update_overlay(app: &SpectrumApp) -> Element<'_, Message> {
     let check_button = |label: &str| {
         button(text(label.to_string()).size(12.0).color(BTN_FG).font(CJK_FONT))
@@ -2080,21 +2071,11 @@ fn update_overlay(app: &SpectrumApp) -> Element<'_, Message> {
                 .girth(Length::Fixed(6.0)),
             );
             col = col.push(hint_text(format!(
-                "{:.1} / {:.1} MB {}",
+                "{:.1} / {:.1} MB {} · 完成后自动重启",
                 received as f32 / 1_048_576.0,
                 total as f32 / 1_048_576.0,
                 pct
             )));
-        }
-        UpdatePhase::Ready(_) => {
-            col = col.push(
-                text("✓ 新版本已下载")
-                    .size(13.0)
-                    .color(BTN_FG)
-                    .font(CJK_FONT),
-            );
-            col = col.push(hint_text("安装时将自动重启应用"));
-            col = col.push(primary_button("立即安装", Message::InstallUpdate));
         }
         UpdatePhase::Failed(e) => {
             col = col.push(

@@ -45,7 +45,7 @@ pub enum UpdateEvent {
     Checked(Result<CheckOutcome, String>),
     /// 下载进度(字节)。
     Progress { received: u64, total: u64 },
-    /// 新版本已就绪(本地可执行文件/包路径),UI 调 [`install`] 换装。
+    /// 新版本已就绪(本地可执行文件/包路径),UI 收到即换装重启。
     Downloaded(PathBuf),
     /// 下载或解压失败。
     Failed(String),
@@ -59,8 +59,6 @@ pub enum UpdatePhase {
     UpToDate(String),
     Available(ReleaseInfo),
     Downloading { received: u64, total: u64 },
-    /// 下载完成,等待用户点击「立即安装」(路径为新版产物)。
-    Ready(PathBuf),
     Failed(String),
 }
 

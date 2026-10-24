@@ -218,7 +218,7 @@ impl NativeMenu {
         ));
         app_menu.addItem(&command_item(
             mtm,
-            "检查更新…",
+            "检测更新…",
             TAG_CHECK_UPDATE,
             None,
             &handler,

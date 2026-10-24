@@ -45,3 +45,21 @@ _Avoid_: restart, refresh
 **Source**:
 The user-selected pairing of a capture kind (Input Capture or Loopback Capture) with a specific device; exactly one Source is active at a time.
 _Avoid_: device, input, stream, channel
+
+### Updater
+
+**Update Check**:
+The act of querying the release source for a newer version, performed automatically at startup and manually from the update window; a failed check is silent by design. Rendered in the UI as 检测更新.
+_Avoid_: 检查更新, upgrade, 更新检查
+
+**Update Asset**:
+The release artifact matching the current platform; its file name carries the version label and platform key, which is how the updater identifies candidates.
+_Avoid_: 安装包, installer, binary
+
+**Swap**:
+Replacing the running app as one felt motion: the old executable is renamed aside, the new one takes its place, and a fresh process is launched. Rendered in the UI as 换装.
+_Avoid_: 覆盖安装, hot update, in-place overwrite
+
+**Red Dot**:
+The small badge on the About menu's top-right corner meaning a newer version has been found or downloaded and awaits the Swap.
+_Avoid_: 角标, notification badge
