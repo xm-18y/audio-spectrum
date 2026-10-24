@@ -669,58 +669,68 @@ pub fn fit_rects(src: [f32; 2], dst: Rect, mode: ScaleMode) -> (Rect, Rect) {
     }
 }
 
-/// 预烘焙盒式模糊(水平 + 垂直各一遭,边缘 clamp)。原地修改。
-pub fn blur_rgba(pixels: &mut [[u8; 4]], width: usize, height: usize, radius: usize) {
-    if radius == 0 || width == 0 || height == 0 {
+/// 预烘焙盒式模糊(水平 + 垂直各一遭,边缘 clamp)。原地修改扁平 RGBA
+/// (`width * height * 4` 字节,行主序)。`scratch` 为调用方持有的整幅暂存
+/// (存水平结果),复用可避免拖动模糊滑块时反复分配/释放。
+pub fn blur_rgba(
+    pixels: &mut [u8],
+    width: usize,
+    height: usize,
+    radius: usize,
+    scratch: &mut Vec<u8>,
+) {
+    if radius == 0 || width == 0 || height == 0 || pixels.len() != width * height * 4 {
         return;
     }
-    let mut tmp = pixels.to_vec();
-    // 水平(滑动窗口,边缘 clamp)。
+    scratch.clear();
+    scratch.resize(width * height * 4, 0);
+    // 水平(滑动窗口,边缘 clamp):src = pixels → dst = scratch。
     for y in 0..height {
         let base = y * width;
-        let row = &mut tmp[base..base + width];
-        let src = &pixels[base..base + width];
         let mut acc = [0u32; 3];
         let mut count = radius.min(width - 1) + 1;
-        for p in &src[..count] {
+        for i in 0..count {
             for c in 0..3 {
-                acc[c] += p[c] as u32;
+                acc[c] += pixels[(base + i) * 4 + c] as u32;
             }
         }
-        for (x, cell) in row.iter_mut().enumerate() {
+        for x in 0..width {
+            let dst = (base + x) * 4;
             for c in 0..3 {
-                cell[c] = (acc[c] / count as u32) as u8;
+                scratch[dst + c] = (acc[c] / count as u32) as u8;
             }
-            cell[3] = 255;
+            scratch[dst + 3] = 255;
             let out_idx = x.saturating_sub(radius);
             let in_idx = (x + radius + 1).min(width - 1);
             for c in 0..3 {
-                acc[c] = acc[c].saturating_sub(src[out_idx][c] as u32) + src[in_idx][c] as u32;
+                acc[c] = acc[c]
+                    .saturating_sub(pixels[(base + out_idx) * 4 + c] as u32)
+                    + pixels[(base + in_idx) * 4 + c] as u32;
             }
             count = (in_idx - out_idx).min(radius * 2 + 1);
         }
     }
-    // 垂直(同法,作用于水平结果)。
+    // 垂直(同法,作用于水平结果):src = scratch → dst = pixels。
     for x in 0..width {
         let mut acc = [0u32; 3];
         let mut count = radius.min(height - 1) + 1;
-        for p in tmp[x..count * width].iter().step_by(width) {
+        for i in 0..count {
             for c in 0..3 {
-                acc[c] += p[c] as u32;
+                acc[c] += scratch[(i * width + x) * 4 + c] as u32;
             }
         }
-        let column: Vec<usize> = (0..height).map(|y| y * width + x).collect();
-        for (y, idx) in column.into_iter().enumerate() {
-            let cell = &mut pixels[idx];
+        for y in 0..height {
+            let dst = (y * width + x) * 4;
             for c in 0..3 {
-                cell[c] = (acc[c] / count as u32) as u8;
+                pixels[dst + c] = (acc[c] / count as u32) as u8;
             }
-            cell[3] = 255;
+            pixels[dst + 3] = 255;
             let out_idx = y.saturating_sub(radius);
             let in_idx = (y + radius + 1).min(height - 1);
             for c in 0..3 {
-                acc[c] = acc[c].saturating_sub(tmp[out_idx * width + x][c] as u32)
-                    + tmp[in_idx * width + x][c] as u32;
+                acc[c] = acc[c]
+                    .saturating_sub(scratch[(out_idx * width + x) * 4 + c] as u32)
+                    + scratch[(in_idx * width + x) * 4 + c] as u32;
             }
             count = (in_idx - out_idx).min(radius * 2 + 1);
         }

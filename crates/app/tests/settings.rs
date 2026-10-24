@@ -136,16 +136,29 @@ fn fit_rects_covers_fits_and_tiles() {
 /// Box blur must spread a dot and leave far corners untouched.
 #[test]
 fn blur_spreads_a_hot_pixel() {
-    // 5×5 黑底,中心白点。
+    // 5×5 黑底,中心白点(扁平 RGBA)。
     let w = 5usize;
-    let mut px = vec![[0u8, 0, 0, 255]; w * w];
-    px[12] = [255, 255, 255, 255];
-    blur_rgba(&mut px, w, 5, 1);
-    assert!(px[12][0] < 255, "center dimmed");
-    assert!(px[11][0] > 0, "horizontal neighbor heated");
-    assert!(px[7][0] > 0, "vertical neighbor heated");
-    assert_eq!(px[0][0], 0, "far corner untouched");
-    assert_eq!(px[12][3], 255, "alpha preserved");
+    let mut px = vec![0u8; w * w * 4];
+    for p in px.chunks_exact_mut(4) {
+        p[3] = 255;
+    }
+    for c in 0..3 {
+        px[12 * 4 + c] = 255;
+    }
+    let mut scratch = Vec::new();
+    blur_rgba(&mut px, w, 5, 1, &mut scratch);
+    let center = &px[12 * 4..12 * 4 + 4];
+    assert!(center[0] < 255, "center dimmed");
+    assert!(px[11 * 4] > 0, "horizontal neighbor heated");
+    assert!(px[7 * 4] > 0, "vertical neighbor heated");
+    assert_eq!(px[0], 0, "far corner untouched");
+    assert_eq!(px[12 * 4 + 3], 255, "alpha preserved");
+
+    // 尺寸不符时整体不动(防护分支)。
+    let mut bad = vec![7u8; 10];
+    let before = bad.clone();
+    blur_rgba(&mut bad, 0, 0, 1, &mut scratch);
+    assert_eq!(bad, before, "malformed buffer rejected");
 }
 
 /// 更名迁移:旧目录的设置搬到新目录,目标已存在时不覆盖。

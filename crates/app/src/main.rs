@@ -311,8 +311,10 @@ struct SpectrumApp {
     last_bands: Vec<f32>,
     last_peaks: Vec<f32>,
     staging: Vec<f32>,
-    /// 背景缓存:解码原图(供模糊参数变化时重烘焙)与成品纹理。
-    bg_raw: Option<(Vec<[u8; 4]>, usize, usize)>,
+    /// 背景缓存:解码原图(扁平 RGBA,供模糊参数变化时重烘焙)与成品纹理。
+    bg_raw: Option<(Vec<u8>, usize, usize)>,
+    /// 模糊烘焙的整幅暂存(水平结果),跨拖动复用,免反复分配。
+    bg_scratch: Vec<u8>,
     bg_key: Option<(PathBuf, u32)>,
     bg_handle: Option<ImageHandle>,
     bg_src_size: [f32; 2],
@@ -414,6 +416,7 @@ impl SpectrumApp {
             last_peaks: vec![DB_FLOOR; band_count],
             staging: Vec::new(),
             bg_raw: None,
+            bg_scratch: Vec::new(),
             bg_key: None,
             bg_handle: None,
             bg_src_size: [1.0, 1.0],
@@ -627,16 +630,11 @@ impl SpectrumApp {
                 if path_changed || self.bg_raw.is_none() {
                     match image::open(path) {
                         Ok(img) => {
-                            let rgba = downscale_to_edge(img, BG_MAX_EDGE).to_rgba8();
+                            // 解码 → 降采样 → into_rgba8 原地搬移,全程扁平 RGBA,
+                            // 不经 `Vec<[u8;4]>` 中转(省 2 份整图拷贝)。
+                            let rgba = downscale_to_edge(img, BG_MAX_EDGE).into_rgba8();
                             let (w, h) = rgba.dimensions();
-                            let pixels: Vec<[u8; 4]> = rgba
-                                .into_raw()
-                                .as_chunks::<4>()
-                                .0
-                                .iter()
-                                .map(|c| [c[0], c[1], c[2], c[3]])
-                                .collect();
-                            self.bg_raw = Some((pixels, w as usize, h as usize));
+                            self.bg_raw = Some((rgba.into_raw(), w as usize, h as usize));
                         }
                         Err(e) => {
                             eprintln!("背景图解码失败:{e}");
@@ -647,17 +645,27 @@ impl SpectrumApp {
                         }
                     }
                 }
-                let (mut pixels, w, h) = self.bg_raw.clone().expect("bg_raw just set");
-                if want_blur > 0 {
-                    blur_rgba(&mut pixels, w, h, want_blur as usize);
-                }
+                let (w, h) = self
+                    .bg_raw
+                    .as_ref()
+                    .map(|(_, w, h)| (*w, *h))
+                    .expect("bg_raw just set");
                 self.bg_src_size = [w as f32, h as f32];
-                let flat: Vec<u8> = pixels.into_iter().flatten().collect();
-                self.bg_handle = Some(ImageHandle::from_rgba(w as u32, h as u32, flat));
-                // 无模糊时原图副本只服务于本次烘焙,随即释放(省一份整图常驻);
-                // 之后开启模糊会重新解码一次,此后拖动滑块复用原图。
                 if want_blur == 0 {
-                    self.bg_raw = None;
+                    // 零模糊:原图缓冲直接移交纹理,零额外拷贝。
+                    let (raw, _, _) = self.bg_raw.take().expect("bg_raw just set");
+                    self.bg_handle = Some(ImageHandle::from_rgba(w as u32, h as u32, raw));
+                } else {
+                    // 有模糊:克隆一份原地烘焙,原图保留供滑块复用;
+                    // 滑动窗口整幅暂存复用 bg_scratch,拖动时不反复分配。
+                    let mut baked = self
+                        .bg_raw
+                        .as_ref()
+                        .expect("bg_raw just set")
+                        .0
+                        .clone();
+                    blur_rgba(&mut baked, w, h, want_blur as usize, &mut self.bg_scratch);
+                    self.bg_handle = Some(ImageHandle::from_rgba(w as u32, h as u32, baked));
                 }
             }
         }
@@ -1417,30 +1425,25 @@ impl SpectrumApp {
         };
         match decoded {
             Some(img) => {
-                let rgba = downscale_to_edge(img, COVER_MAX_EDGE).to_rgba8();
+                // 解码 → 降采样 → into_rgba8 原地搬移,全程扁平 RGBA,
+                // 裁方/蒙版/上传零格式转换(省 2 份整图拷贝)。
+                let rgba = downscale_to_edge(img, COVER_MAX_EDGE).into_rgba8();
                 let (w, h) = rgba.dimensions();
-                let pixels: Vec<[u8; 4]> = rgba
-                    .into_raw()
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|c| [c[0], c[1], c[2], c[3]])
-                    .collect();
+                let flat = rgba.into_raw();
                 // 中心裁方:非方图不再拉伸变形(短边为边长,居中裁切)。
                 let (w, h) = (w as usize, h as usize);
                 let side = w.min(h);
                 let (x0, y0) = ((w - side) / 2, (h - side) / 2);
-                let mut cropped = Vec::with_capacity(side * side);
+                let mut cropped = Vec::with_capacity(side * side * 4);
                 for y in y0..y0 + side {
-                    cropped.extend_from_slice(&pixels[y * w + x0..y * w + x0 + side]);
+                    let a = (y * w + x0) * 4;
+                    cropped.extend_from_slice(&flat[a..a + side * 4]);
                 }
                 let (w, h) = (side, side);
-                let mut pixels = cropped;
                 if want.1 {
-                    bake_circle_mask(&mut pixels, w, h);
+                    bake_circle_mask(&mut cropped, w, h);
                 }
-                let flat: Vec<u8> = pixels.into_iter().flatten().collect();
-                self.cover_handle = Some(ImageHandle::from_rgba(w as u32, h as u32, flat));
+                self.cover_handle = Some(ImageHandle::from_rgba(w as u32, h as u32, cropped));
             }
             None => self.cover_handle = None,
         }
@@ -1459,9 +1462,9 @@ fn downscale_to_edge(img: image::DynamicImage, max_edge: u32) -> image::DynamicI
     img.resize_exact(nw, nh, image::imageops::FilterType::Triangle)
 }
 
-/// 圆形封面蒙版:圆外 alpha 归零,边缘 2px 线性羽化。加载时一次性烘焙,
-/// 运行时零成本(iced canvas 无路径裁剪,图像只能矩形绘制)。
-fn bake_circle_mask(pixels: &mut [[u8; 4]], w: usize, h: usize) {
+/// 圆形封面蒙版:圆外 alpha 归零,边缘 2px 线性羽化(扁平 RGBA)。
+/// 加载时一次性烘焙,运行时零成本(iced canvas 无路径裁剪,图像只能矩形绘制)。
+fn bake_circle_mask(pixels: &mut [u8], w: usize, h: usize) {
     if w == 0 || h == 0 {
         return;
     }
@@ -1473,8 +1476,8 @@ fn bake_circle_mask(pixels: &mut [[u8; 4]], w: usize, h: usize) {
             let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt();
             let a = ((r - d) / 2.0).clamp(0.0, 1.0);
             if a < 1.0 {
-                let px = &mut pixels[y * w + x];
-                px[3] = (px[3] as f32 * a) as u8;
+                let idx = (y * w + x) * 4 + 3;
+                pixels[idx] = (pixels[idx] as f32 * a) as u8;
             }
         }
     }
