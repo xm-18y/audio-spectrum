@@ -170,6 +170,31 @@ fn peak_hold_decays_slower_than_the_band() {
     );
 }
 
+/// A smaller peak-decay scale makes the held peak fall more slowly.
+#[test]
+fn peak_decay_scale_slows_the_peak() {
+    let silence = [DB_FLOOR; 4];
+    let loud = [0.0; 4];
+    let mut normal = Smoother::new(4, true);
+    let mut slow = Smoother::new(4, true);
+    slow.set_peak_decay_scale(0.5);
+
+    normal.process(&loud);
+    slow.process(&loud);
+    for _ in 0..10 {
+        normal.process(&silence);
+        slow.process(&silence);
+    }
+    let normal = normal.process(&silence);
+    let slow = slow.process(&silence);
+    assert!(
+        slow.peaks[1] > normal.peaks[1] + 1.0,
+        "slow {} vs normal {}",
+        slow.peaks[1],
+        normal.peaks[1]
+    );
+}
+
 /// With Peak Hold off, peaks simply mirror the Band values.
 #[test]
 fn peak_hold_can_be_disabled() {

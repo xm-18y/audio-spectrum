@@ -414,30 +414,35 @@ impl ThemePreset {
                 bar_top: [255, 72, 52],
                 bg: [12, 14, 19],
                 peak: [232, 238, 248],
+                peak_hold: [232, 238, 248],
             },
             ThemePreset::Aurora => Palette {
                 bar_bottom: [20, 160, 160],
                 bar_top: [130, 255, 175],
                 bg: [9, 15, 17],
                 peak: [205, 255, 235],
+                peak_hold: [205, 255, 235],
             },
             ThemePreset::Magma => Palette {
                 bar_bottom: [140, 30, 20],
                 bar_top: [255, 200, 60],
                 bg: [17, 10, 8],
                 peak: [255, 232, 205],
+                peak_hold: [255, 232, 205],
             },
             ThemePreset::Neon => Palette {
                 bar_bottom: [170, 40, 220],
                 bar_top: [90, 240, 255],
                 bg: [14, 10, 20],
                 peak: [240, 220, 255],
+                peak_hold: [240, 220, 255],
             },
             ThemePreset::Amber => Palette {
                 bar_bottom: [125, 70, 10],
                 bar_top: [255, 190, 80],
                 bg: [18, 14, 8],
                 peak: [255, 240, 210],
+                peak_hold: [255, 240, 210],
             },
         }
     }
@@ -450,6 +455,7 @@ pub struct Palette {
     pub bar_top: [u8; 3],
     pub bg: [u8; 3],
     pub peak: [u8; 3],
+    pub peak_hold: [u8; 3],
 }
 
 /// 频谱柱渐变:基色 → 顶色线性插值。
@@ -463,20 +469,58 @@ pub fn band_color(p: &Palette, t: f32) -> [u8; 3] {
     ]
 }
 
+/// 频谱的整体布局类型。
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum SpectrumType {
+    /// 横向对数轴上的竖条(原有效果)。
+    #[default]
+    Bar,
+    /// 环形排列的径向频谱。
+    Radial,
+}
+
+impl SpectrumType {
+    pub const ALL: &'static [SpectrumType] = &[SpectrumType::Bar, SpectrumType::Radial];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            SpectrumType::Bar => "条形",
+            SpectrumType::Radial => "圆形",
+        }
+    }
+}
+
 /// 样式设置:预设打底 + 逐槽颜色覆盖。
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct StyleSettings {
     pub theme: ThemePreset,
     pub bar_bottom: Option<[u8; 3]>,
     pub bar_top: Option<[u8; 3]>,
     pub bg: Option<[u8; 3]>,
     pub peak: Option<[u8; 3]>,
+    /// 峰值保持点颜色;未设置时沿用峰值色。
+    pub peak_hold: Option<[u8; 3]>,
     /// 是否绘制频率/幅度网格。
     pub grid: bool,
     /// 柱条圆角(px)。
     pub corner_radius: f32,
     /// 柱条间隙占柱宽的比例(0..0.5)。
     pub bar_gap: f32,
+    /// 频谱整体布局(条形/圆形)。
+    pub spectrum_type: SpectrumType,
+    /// 方块选项:无论条形还是圆形,都以离散方块绘制。
+    pub blocks: bool,
+    /// 方块高度(px),仅方块模式下生效。
+    pub block_height: f32,
+    /// 相邻方块之间的间隔(px),仅方块模式下生效。
+    pub block_gap: f32,
+    /// 峰值标记与柱体之间留出间隔,形成悬空拖尾帽。
+    pub peak_detached: bool,
+    /// 峰值保持点的高度(px)。
+    pub peak_cap_height: f32,
+    /// 峰值保持点与柱体顶端的间隔(px),仅在峰值保持点分离时生效。
+    pub peak_gap: f32,
 }
 
 impl Default for StyleSettings {
@@ -487,9 +531,17 @@ impl Default for StyleSettings {
             bar_top: None,
             bg: None,
             peak: None,
+            peak_hold: None,
             grid: true,
             corner_radius: 1.0,
             bar_gap: 0.15,
+            spectrum_type: SpectrumType::Bar,
+            blocks: false,
+            block_height: 6.0,
+            block_gap: 1.0,
+            peak_detached: false,
+            peak_cap_height: 4.0,
+            peak_gap: 6.0,
         }
     }
 }
@@ -509,6 +561,8 @@ pub fn resolve_palette(style: &StyleSettings) -> Palette {
     if let Some(c) = style.peak {
         p.peak = c;
     }
+    // 峰值保持点默认跟随峰值色,单独覆盖时使用自己的颜色。
+    p.peak_hold = style.peak_hold.unwrap_or(p.peak);
     p
 }
 
@@ -722,7 +776,6 @@ pub struct Settings {
     pub view: ViewMode,
     pub always_on_top: bool,
     pub band_count: usize,
-    pub peak_hold: bool,
     pub decay: DecayChoice,
     pub style: StyleSettings,
     pub background: BackgroundSettings,
@@ -753,7 +806,6 @@ impl Default for Settings {
             view: ViewMode::Spectrum,
             always_on_top: false,
             band_count: 96,
-            peak_hold: true,
             decay: DecayChoice::Medium,
             style: StyleSettings::default(),
             background: BackgroundSettings::default(),
@@ -894,6 +946,16 @@ mod tests {
         assert_eq!(s.glow, GlowSettings::default());
         assert_eq!(s.disc, DiscSettings::default());
         assert_eq!(s.screensaver, ScreensaverSettings::default());
+    }
+
+    #[test]
+    fn old_style_section_gets_new_spectrum_option_defaults() {
+        // 旧版样式节没有 spectrum_type / blocks / peak_detached,serde(default)补齐。
+        let s: Settings = ron::from_str("(style: (theme: Neon))").expect("旧样式应可解析");
+        assert_eq!(s.style.theme, ThemePreset::Neon);
+        assert_eq!(s.style.spectrum_type, SpectrumType::Bar);
+        assert!(!s.style.blocks);
+        assert!(!s.style.peak_detached);
     }
 
     #[test]

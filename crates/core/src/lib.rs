@@ -257,6 +257,7 @@ pub struct Smoother {
     num_bands: usize,
     peak_hold: bool,
     decay: DecaySpeed,
+    peak_decay_scale: f32,
     bands: Vec<f32>,
     peaks: Vec<f32>,
 }
@@ -304,6 +305,7 @@ impl Smoother {
             num_bands,
             peak_hold,
             decay: DecaySpeed::Medium,
+            peak_decay_scale: 1.0,
             bands: vec![DB_FLOOR; num_bands],
             peaks: vec![DB_FLOOR; num_bands],
         }
@@ -312,6 +314,11 @@ impl Smoother {
     /// Sets the decay pacing for falling display values and Peak Hold.
     pub fn set_decay(&mut self, decay: DecaySpeed) {
         self.decay = decay;
+    }
+
+    /// Scales only the Peak Hold fall speed; smaller values hold peaks longer.
+    pub fn set_peak_decay_scale(&mut self, scale: f32) {
+        self.peak_decay_scale = scale.clamp(0.05, 4.0);
     }
 
     /// Turns Peak Hold on or off without resetting the display state.
@@ -332,7 +339,7 @@ impl Smoother {
             // 峰值帽钳制:不得低于当前显示柱顶——柱体按剩余距离比例下落
             // (小回落时每帧仅 ~0.1dB),峰帽固定 dB/帧衰减会反超沉入柱内。
             self.peaks[i] = if self.peak_hold {
-                t.max(self.peaks[i] - self.decay.peak_decay())
+                t.max(self.peaks[i] - self.decay.peak_decay() * self.peak_decay_scale)
                     .max(self.bands[i])
             } else {
                 self.bands[i]

@@ -5,8 +5,8 @@
 //! (the global-path convenience wrappers are only exercised indirectly).
 
 use audio_spectrum_app::{
-    DecayChoice, Rect, ScaleMode, Settings, StyleSettings, ThemePreset, ViewMode, band_color,
-    blur_rgba, fit_rects, load_from, resolve_palette, save_to,
+    DecayChoice, Rect, ScaleMode, Settings, SpectrumType, StyleSettings, ThemePreset, ViewMode,
+    band_color, blur_rgba, fit_rects, load_from, resolve_palette, save_to,
 };
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
@@ -27,11 +27,14 @@ fn settings_round_trip() {
     let mut s = Settings::default();
     s.view = ViewMode::Spectrogram;
     s.band_count = 64;
-    s.peak_hold = false;
     s.decay = DecayChoice::Fast;
     s.style.theme = ThemePreset::Magma;
     s.style.bar_bottom = Some([200, 40, 20]);
     s.style.grid = false;
+    s.style.spectrum_type = SpectrumType::Radial;
+    s.style.blocks = true;
+    s.style.peak_detached = true;
+    s.style.peak_hold = Some([20, 200, 90]);
     s.background.path = Some("/tmp/x.jpg".into());
     s.background.mode = ScaleMode::Tile;
     s.background.opacity = 0.4;
@@ -67,6 +70,11 @@ fn palette_resolves_preset_then_overrides() {
     };
     let plain = resolve_palette(&style);
     assert_eq!(plain, resolve_palette(&style), "stable");
+    assert_eq!(plain.peak_hold, plain.peak, "peak hold follows peak by default");
+
+    let mut peak_only = style.clone();
+    peak_only.peak = Some([9, 8, 7]);
+    assert_eq!(resolve_palette(&peak_only).peak_hold, [9, 8, 7]);
 
     let mut overridden = style.clone();
     overridden.bar_top = Some([250, 250, 250]);

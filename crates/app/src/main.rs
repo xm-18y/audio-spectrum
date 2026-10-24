@@ -20,7 +20,7 @@
 
 use audio_spectrum_app::{
     BackgroundSettings, DecayChoice, GlowLayout, Palette, ParticleEmission, ScaleMode,
-    ScreensaverStyle, Settings, ThemePreset, ViewMode, WaveformColor, BAND_COUNT_MAX,
+    ScreensaverStyle, Settings, SpectrumType, ThemePreset, ViewMode, WaveformColor, BAND_COUNT_MAX,
     BAND_COUNT_MIN, autostart, band_color as palette_band_color, blur_rgba, keep_awake,
     load as load_settings, pin_windows_wgpu_backend, resolve_palette, save as save_settings,
     spectro_pixels,
@@ -59,6 +59,17 @@ const FREQ_TICKS: &[f32] = &[
     63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
 ];
 const DB_TICKS: &[f32] = &[0.0, -20.0, -40.0, -60.0];
+/// 非方块布局的峰值帽下落减速系数(越小下落越慢)。
+const PEAK_HOLD_SLOW_SCALE: f32 = 0.5;
+/// 频谱显示增益:柱体与峰值帽的视觉幅度放大 1/4。
+const SPECTRUM_GAIN: f32 = 1.25;
+/// 方块尺寸的参考绘图高度:绘图高度为 440px 时,设置值即实际像素;
+/// 全屏/放大窗口时按高度等比缩放,保持方块数量与视觉比例一致。
+const BLOCK_SCALE_REF_HEIGHT: f32 = 440.0;
+/// 圆形中心的雷达扫描:拖尾约占圆周 1/6,另含转速与拖尾线数量。
+const RADAR_SWEEP: f32 = std::f32::consts::TAU / 6.0;
+const RADAR_TURNS_PER_SEC: f32 = 0.22;
+const RADAR_TRAIL_LINES: usize = 90;
 
 /// Embedded at compile time so the binary has no runtime asset dependency.
 const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/icons/audio-spectrum-256.png");
@@ -133,13 +144,19 @@ enum Message {
     ToggleHud,
     SelectSource(DeviceInfo),
     SetBandCount(usize),
-    TogglePeakHold,
     SetDecay(DecayChoice),
     ToggleGrid,
     SetTheme(ThemePreset),
     ColorSlotReset(ColorSlot),
     SetCornerRadius(f32),
     SetBarGap(f32),
+    SetSpectrumType(SpectrumType),
+    ToggleBlocks,
+    SetBlockHeight(f32),
+    SetBlockGap(f32),
+    TogglePeakDetached,
+    SetPeakCapHeight(f32),
+    SetPeakGap(f32),
     // —— 特效窗体(ADR-0005):各视图独立配置 + 通用页 ——
     /// 选中 tab:视图 tab 即切主窗口视图(Q9),通用 tab 仅换页。
     SelectTab(EffectsTab),
@@ -208,6 +225,7 @@ enum ColorSlot {
     BarTop,
     Bg,
     Peak,
+    PeakHold,
 }
 
 /// 颜色选择器的目标槽(一次只开一个弹窗)。
@@ -344,8 +362,10 @@ impl SpectrumApp {
         let band_count = settings.band_count;
         let fullscreen_start = settings.default_fullscreen;
         let decay: DecaySpeed = settings.decay.into();
-        let mut smoother = Smoother::new(band_count, settings.peak_hold);
+        // 峰值保持点常驻,没有单独的开关。
+        let mut smoother = Smoother::new(band_count, true);
         smoother.set_decay(decay);
+        smoother.set_peak_decay_scale(peak_hold_decay_scale(settings.style.blocks));
         SpectrumApp {
             system,
             source,
@@ -493,8 +513,10 @@ impl SpectrumApp {
         let band_count = self.settings.band_count;
         self.analyzer = Analyzer::new(band_count);
         let decay: DecaySpeed = self.settings.decay.into();
-        self.smoother = Smoother::new(band_count, self.settings.peak_hold);
+        self.smoother = Smoother::new(band_count, true);
         self.smoother.set_decay(decay);
+        self.smoother
+            .set_peak_decay_scale(peak_hold_decay_scale(self.settings.style.blocks));
         self.spectrograph = Spectrograph::new(band_count);
         self.target = vec![DB_FLOOR; band_count];
         self.last_bands = vec![DB_FLOOR; band_count];
@@ -789,6 +811,7 @@ impl SpectrumApp {
             ColorSlot::BarTop => self.settings.style.bar_top = None,
             ColorSlot::Bg => self.settings.style.bg = None,
             ColorSlot::Peak => self.settings.style.peak = None,
+            ColorSlot::PeakHold => self.settings.style.peak_hold = None,
         }
         self.mark_dirty();
     }
@@ -801,6 +824,7 @@ impl SpectrumApp {
             PickerId::Spectrum(ColorSlot::BarTop) => pal.bar_top,
             PickerId::Spectrum(ColorSlot::Bg) => pal.bg,
             PickerId::Spectrum(ColorSlot::Peak) => pal.peak,
+            PickerId::Spectrum(ColorSlot::PeakHold) => pal.peak_hold,
             PickerId::Waveform => self.settings.waveform.custom_color.unwrap_or(pal.bar_top),
             PickerId::Particles => self.settings.particles.custom_color.unwrap_or(pal.bar_top),
             PickerId::Glow => self.settings.glow.custom_color.unwrap_or(pal.bar_top),
@@ -825,6 +849,7 @@ impl SpectrumApp {
             ColorSlot::BarTop => self.settings.style.bar_top = Some(rgb),
             ColorSlot::Bg => self.settings.style.bg = Some(rgb),
             ColorSlot::Peak => self.settings.style.peak = Some(rgb),
+            ColorSlot::PeakHold => self.settings.style.peak_hold = Some(rgb),
         }
         self.mark_dirty();
     }
@@ -1656,12 +1681,6 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::TogglePeakHold => {
-            app.settings.peak_hold = !app.settings.peak_hold;
-            app.smoother.set_peak_hold(app.settings.peak_hold);
-            app.mark_dirty();
-            Task::none()
-        }
         Message::SetDecay(d) => {
             app.settings.decay = d;
             app.smoother.set_decay(d.into());
@@ -1689,6 +1708,43 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
         }
         Message::SetBarGap(v) => {
             app.settings.style.bar_gap = v.clamp(0.0, 0.45);
+            app.mark_dirty();
+            Task::none()
+        }
+        Message::SetSpectrumType(t) => {
+            app.settings.style.spectrum_type = t;
+            app.mark_dirty();
+            Task::none()
+        }
+        Message::ToggleBlocks => {
+            app.settings.style.blocks = !app.settings.style.blocks;
+            app.smoother
+                .set_peak_decay_scale(peak_hold_decay_scale(app.settings.style.blocks));
+            app.mark_dirty();
+            Task::none()
+        }
+        Message::SetBlockHeight(v) => {
+            app.settings.style.block_height = v.clamp(1.0, 50.0);
+            app.mark_dirty();
+            Task::none()
+        }
+        Message::SetBlockGap(v) => {
+            app.settings.style.block_gap = v.clamp(1.0, 50.0);
+            app.mark_dirty();
+            Task::none()
+        }
+        Message::TogglePeakDetached => {
+            app.settings.style.peak_detached = !app.settings.style.peak_detached;
+            app.mark_dirty();
+            Task::none()
+        }
+        Message::SetPeakCapHeight(v) => {
+            app.settings.style.peak_cap_height = v.clamp(0.0, 10.0);
+            app.mark_dirty();
+            Task::none()
+        }
+        Message::SetPeakGap(v) => {
+            app.settings.style.peak_gap = v.clamp(1.0, 10.0);
             app.mark_dirty();
             Task::none()
         }
@@ -2348,11 +2404,15 @@ impl canvas::Program<Message> for SpectrumView<'_> {
             ViewMode::Static => {}
             ViewMode::Screensaver => self.draw_screensaver(&mut frame, plot),
         }
-        // 悬停读数仅频谱/语谱有意义(Q11)。
-        if matches!(
-            self.app.settings.view,
-            ViewMode::Spectrum | ViewMode::Spectrogram
-        ) {
+        // 悬停读数仅线性频谱/语谱有意义(圆形布局无法用 x 轴反查频段)。
+        let hoverable = match self.app.settings.view {
+            ViewMode::Spectrogram => true,
+            ViewMode::Spectrum => {
+                self.app.settings.style.spectrum_type != SpectrumType::Radial
+            }
+            _ => false,
+        };
+        if hoverable {
             self.draw_hover(&mut frame, plot, bounds, cursor);
         }
 
@@ -2374,34 +2434,120 @@ impl SpectrumView<'_> {
         // 全出血:底色铺满画布,无圆角无边距。
         frame.fill_rectangle(plot.position(), plot.size(), plot_bg);
 
-        let (l, r) = (plot.x, plot.x + plot.width);
-        let (top, bottom) = (plot.y, plot.y + plot.height);
-        let (w, h) = (plot.width, plot.height);
-
+        let kind = self.app.settings.style.spectrum_type;
+        let blocks = self.app.settings.style.blocks;
         if self.app.settings.style.grid {
-            for &db in DB_TICKS {
-                let y = db_to_y(db, top, h);
-                frame.stroke(
-                    &canvas::Path::line(Point::new(l, y), Point::new(r, y)),
-                    grid_stroke(GRID),
-                );
-                frame.fill_text(canvas::Text {
-                    content: format!("{}dB", db as i32),
-                    position: Point::new(l + 4.0, y - 2.0),
-                    size: Pixels(10.0),
-                    color: AXIS_TEXT,
-                    font: Font::MONOSPACE,
-                    align_x: Horizontal::Left.into(),
-                    align_y: Vertical::Bottom,
-                    ..Default::default()
-                });
+            match kind {
+                SpectrumType::Radial => self.draw_radial_grid(frame, plot),
+                SpectrumType::Bar => self.draw_linear_grid(frame, plot),
             }
-            self.draw_freq_grid(frame, plot);
         }
+        match (kind, blocks) {
+            (SpectrumType::Bar, false) => self.draw_spectrum_bars(frame, plot),
+            (SpectrumType::Bar, true) => self.draw_spectrum_linear_blocks(frame, plot),
+            (SpectrumType::Radial, false) => self.draw_spectrum_radial(frame, plot),
+            (SpectrumType::Radial, true) => self.draw_spectrum_radial_blocks(frame, plot),
+        }
+    }
 
-        let gap = self.app.settings.style.bar_gap;
-        let peak_color = Color::from_rgba8(pal.peak[0], pal.peak[1], pal.peak[2], 225.0 / 255.0);
-        let rounding = self.app.settings.style.corner_radius;
+    /// 条形布局的幅度与频率网格。
+    fn draw_linear_grid(&self, frame: &mut CanvasFrame, plot: Rectangle) {
+        let (l, r) = (plot.x, plot.x + plot.width);
+        let (top, h) = (plot.y, plot.height);
+        for &db in DB_TICKS {
+            let y = db_to_y(db, top, h);
+            frame.stroke(
+                &canvas::Path::line(Point::new(l, y), Point::new(r, y)),
+                grid_stroke(GRID),
+            );
+            frame.fill_text(canvas::Text {
+                content: format!("{}dB", db as i32),
+                position: Point::new(l + 4.0, y - 2.0),
+                size: Pixels(10.0),
+                color: AXIS_TEXT,
+                font: Font::MONOSPACE,
+                align_x: Horizontal::Left.into(),
+                align_y: Vertical::Bottom,
+                ..Default::default()
+            });
+        }
+        self.draw_freq_grid(frame, plot);
+    }
+
+    /// 径向布局的同心 dB 环与频率辐条。
+    fn draw_radial_grid(&self, frame: &mut CanvasFrame, plot: Rectangle) {
+        let (cx, cy, r0, span) = radial_geometry(plot);
+        for &db in DB_TICKS {
+            let radius = r0 + span * db_t(db);
+            frame.stroke(
+                &canvas::Path::circle(Point::new(cx, cy), radius),
+                grid_stroke(GRID),
+            );
+        }
+        for &f in FREQ_TICKS {
+            let a = radial_angle(freq_to_t(f));
+            let (sin, cos) = a.sin_cos();
+            frame.stroke(
+                &canvas::Path::line(
+                    Point::new(cx + cos * r0, cy + sin * r0),
+                    Point::new(cx + cos * (r0 + span), cy + sin * (r0 + span)),
+                ),
+                grid_stroke(FREQ_GRID),
+            );
+        }
+    }
+
+    /// 圆形布局中心:默认填充渐变底色,其上叠加渐变顶色的雷达
+    /// 扫描线与拖尾。
+    fn draw_radar_sweep(&self, frame: &mut CanvasFrame, plot: Rectangle) {
+        let (cx, cy, r0, _) = radial_geometry(plot);
+        let base = self.palette.bar_bottom;
+        let tip = self.palette.bar_top;
+        let center = Point::new(cx, cy);
+        // 中心圆默认用渐变底色铺底,替代原来的背景色。
+        frame.fill(
+            &canvas::Path::circle(center, r0),
+            Color::from_rgba8(base[0], base[1], base[2], 1.0),
+        );
+        let head = radial_angle(
+            (self.app.now() as f32 * RADAR_TURNS_PER_SEC).rem_euclid(1.0),
+        );
+        let tail = head - RADAR_SWEEP;
+        let step = RADAR_SWEEP / (RADAR_TRAIL_LINES - 1) as f32;
+        let color = |alpha: f32| Color::from_rgba8(tip[0], tip[1], tip[2], alpha);
+        for i in 0..RADAR_TRAIL_LINES {
+            let t = i as f32 / (RADAR_TRAIL_LINES - 1) as f32;
+            let angle = tail + step * i as f32;
+            let (s, c) = angle.sin_cos();
+            let point = Point::new(cx + c * r0, cy + s * r0);
+            let line = canvas::Path::line(center, point);
+            frame.stroke(
+                &line,
+                canvas::Stroke::default()
+                    .with_width(1.2 + 0.8 * t)
+                    .with_color(color(t * 0.8)),
+            );
+        }
+        // 前沿扫描线使用渐变顶色。
+        let (s, c) = head.sin_cos();
+        let edge = canvas::Path::line(center, Point::new(cx + c * r0, cy + s * r0));
+        frame.stroke(
+            &edge,
+            canvas::Stroke::default()
+                .with_width(2.5)
+                .with_color(color(0.95)),
+        );
+    }
+
+    /// 条形布局:保持不变的对数轴竖条 + 垂直渐变。
+    fn draw_spectrum_bars(&self, frame: &mut CanvasFrame, plot: Rectangle) {
+        let pal = &self.palette;
+        let style = &self.app.settings.style;
+        let (l, w) = (plot.x, plot.width);
+        let (top, bottom, h) = (plot.y, plot.y + plot.height, plot.height);
+        let peak_color =
+            Color::from_rgba8(pal.peak_hold[0], pal.peak_hold[1], pal.peak_hold[2], 225.0 / 255.0);
+        let rounding = style.corner_radius;
         for i in 0..self.app.analyzer.num_bands() {
             let (f_lo, f_hi) = self.app.analyzer.band_edges(i);
             let x0 = freq_to_x(f_lo, l, w) + 0.5;
@@ -2410,9 +2556,9 @@ impl SpectrumView<'_> {
             if raw_w < 0.5 {
                 continue;
             }
-            let inset = (raw_w * gap * 0.5).min(raw_w * 0.45);
+            let inset = (raw_w * style.bar_gap * 0.5).min(raw_w * 0.45);
             let (x0, x1) = (x0 + inset, x1 - inset);
-            let bar_top = db_to_y(self.app.last_bands[i], top, h);
+            let bar_top = spectrum_to_y(self.app.last_bands[i], top, h);
             if bottom - bar_top > 0.5 {
                 // 垂直渐变(基色 → 顶色)以 12 段实心矩形近似(等价
                 // egui 时代的 12 段渐变网格,肉眼无差)。
@@ -2429,19 +2575,175 @@ impl SpectrumView<'_> {
                     );
                 }
             }
-            let peak = self.app.last_peaks[i];
-            if peak > DB_FLOOR + 0.5 {
-                // 峰值保持块:悬于柱子上方——底边对齐峰值电平,衰减慢于
-                // 柱体(PEAK_DECAY < RELEASE 视觉),形成经典拖尾帽。
-                let py = db_to_y(peak, top, h);
-                let radius = rounding.round().clamp(0.0, 2.0);
+            draw_peak_cap(
+                frame,
+                (x0, x1),
+                self.app.last_peaks[i],
+                plot,
+                peak_color,
+                rounding,
+                (
+                    style.peak_cap_height,
+                    if style.peak_detached { style.peak_gap } else { 0.0 },
+                ),
+            );
+        }
+    }
+
+    /// 方块选项下的条形布局:每个频段由自下而上堆叠的方块组成。
+    fn draw_spectrum_linear_blocks(&self, frame: &mut CanvasFrame, plot: Rectangle) {
+        let pal = &self.palette;
+        let style = &self.app.settings.style;
+        let (l, w) = (plot.x, plot.width);
+        let (top, bottom, h) = (plot.y, plot.y + plot.height, plot.height);
+        let peak_color =
+            Color::from_rgba8(pal.peak_hold[0], pal.peak_hold[1], pal.peak_hold[2], 225.0 / 255.0);
+        for i in 0..self.app.analyzer.num_bands() {
+            let (f_lo, f_hi) = self.app.analyzer.band_edges(i);
+            let x0 = freq_to_x(f_lo, l, w) + 0.5;
+            let x1 = freq_to_x(f_hi, l, w) - 0.5;
+            let raw_w = x1 - x0;
+            if raw_w < 0.5 {
+                continue;
+            }
+            let inset = (raw_w * style.bar_gap * 0.5).min(raw_w * 0.45);
+            let (x0, x1) = (x0 + inset, x1 - inset);
+            // 方块高度与间隔由样式设置控制,并按绘图高度等比缩放。
+            let bar_top = spectrum_to_y(self.app.last_bands[i], top, h);
+            let level_h = bottom - bar_top;
+            let cell = scaled_block(style.block_height, h);
+            let cell_gap = scaled_block(style.block_gap, h);
+            let rows = (level_h / (cell + cell_gap)).floor() as usize;
+            for row in 0..rows {
+                let y1 = bottom - row as f32 * (cell + cell_gap);
+                let y0 = (y1 - cell).max(top);
+                if y1 - y0 < 0.5 {
+                    continue;
+                }
+                let t = ((bottom - (y0 + y1) * 0.5) / h).clamp(0.0, 1.0);
                 fill_rounded(
                     frame,
-                    Rectangle::new(Point::new(x0, py - 4.0), Size::new(x1 - x0, 4.0)),
-                    radius,
-                    peak_color,
+                    Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0)),
+                    style.corner_radius.min(1.5),
+                    band_color(pal, t),
                 );
             }
+            draw_peak_cap(
+                frame,
+                (x0, x1),
+                self.app.last_peaks[i],
+                plot,
+                peak_color,
+                style.corner_radius,
+                (
+                    style.peak_cap_height,
+                    if style.peak_detached { style.peak_gap } else { 0.0 },
+                ),
+            );
+        }
+    }
+
+    /// 圆形布局:频段沿圆周由内向外辐射,径向长度即电平。
+    fn draw_spectrum_radial(&self, frame: &mut CanvasFrame, plot: Rectangle) {
+        let pal = &self.palette;
+        let style = &self.app.settings.style;
+        let (cx, cy, r0, span) = radial_geometry(plot);
+        self.draw_radar_sweep(frame, plot);
+        let peak_color =
+            Color::from_rgba8(pal.peak_hold[0], pal.peak_hold[1], pal.peak_hold[2], 225.0 / 255.0);
+        for i in 0..self.app.analyzer.num_bands() {
+            let (f_lo, f_hi) = self.app.analyzer.band_edges(i);
+            let (t0, t1) = (freq_to_t(f_lo), freq_to_t(f_hi));
+            let dt = t1 - t0;
+            if dt <= 0.0 {
+                continue;
+            }
+            let inset = (dt * style.bar_gap * 0.5).min(dt * 0.45);
+            let a0 = radial_angle(t0 + inset);
+            let a1 = radial_angle(t1 - inset);
+            let outer = r0 + span * spectrum_t(self.app.last_bands[i]);
+            if outer - r0 > 0.5 {
+                // 径向渐变(内=基色,外=顶色)以 8 段弧近似。
+                const SEGMENTS: usize = 8;
+                for s in 0..SEGMENTS {
+                    let u0 = s as f32 / SEGMENTS as f32;
+                    let u1 = (s + 1) as f32 / SEGMENTS as f32;
+                    let ri = r0 + (outer - r0) * u0;
+                    let ro = r0 + (outer - r0) * u1;
+                    let arc = radial_arc(cx, cy, (ri + ro) * 0.5, a0, a1);
+                    frame.stroke(
+                        &arc,
+                        canvas::Stroke::default()
+                            .with_width((ro - ri).max(0.5))
+                            .with_color(band_color(pal, (u0 + u1) * 0.5)),
+                    );
+                }
+            }
+            let peak = self.app.last_peaks[i];
+            // 峰值帽:同一直径上的短弧;衰减到最低电平时落在柱体根部。
+            let rp = r0 + span * spectrum_t(peak);
+            let gap = if style.peak_detached { style.peak_gap } else { 0.0 };
+            let arc = radial_arc(cx, cy, rp + gap, a0, a1);
+            frame.stroke(
+                &arc,
+                canvas::Stroke::default()
+                    .with_width(style.peak_cap_height.max(1.0))
+                    .with_color(peak_color),
+            );
+        }
+    }
+
+    /// 方块选项下的圆形布局:方块沿径向堆叠,径向长度即电平。
+    fn draw_spectrum_radial_blocks(&self, frame: &mut CanvasFrame, plot: Rectangle) {
+        let pal = &self.palette;
+        let style = &self.app.settings.style;
+        let (cx, cy, r0, span) = radial_geometry(plot);
+        self.draw_radar_sweep(frame, plot);
+        let peak_color =
+            Color::from_rgba8(pal.peak_hold[0], pal.peak_hold[1], pal.peak_hold[2], 225.0 / 255.0);
+        for i in 0..self.app.analyzer.num_bands() {
+            let (f_lo, f_hi) = self.app.analyzer.band_edges(i);
+            let (t0, t1) = (freq_to_t(f_lo), freq_to_t(f_hi));
+            let dt = t1 - t0;
+            if dt <= 0.0 {
+                continue;
+            }
+            let inset = (dt * style.bar_gap * 0.5).min(dt * 0.45);
+            let a0 = radial_angle(t0 + inset);
+            let a1 = radial_angle(t1 - inset);
+            let outer = r0 + span * spectrum_t(self.app.last_bands[i]);
+            let level_h = outer - r0;
+            // 方块径向厚度与间隔由样式设置控制,并按绘图尺寸等比缩放。
+            let dim = plot.width.min(plot.height);
+            let cell = scaled_block(style.block_height, dim);
+            let cell_gap = scaled_block(style.block_gap, dim);
+            if level_h > 0.5 {
+                // 每块都是贯穿该频段角度的环形扇区(沿径向切分),
+                // 而不是落在角平分线上的单个方块。
+                let rows = (level_h / (cell + cell_gap)).floor() as usize;
+                for row in 0..rows {
+                    let rr = r0 + row as f32 * (cell + cell_gap) + cell * 0.5;
+                    let t = (row as f32 / rows.max(1) as f32).clamp(0.0, 1.0);
+                    let arc = radial_arc(cx, cy, rr, a0, a1);
+                    frame.stroke(
+                        &arc,
+                        canvas::Stroke::default()
+                            .with_width(cell)
+                            .with_color(band_color(pal, t)),
+                    );
+                }
+            }
+            let peak = self.app.last_peaks[i];
+            // 与条形布局共用同一峰值帽厚度;最低时落在柱体根部。
+            let rp = r0 + span * spectrum_t(peak);
+            let gap = if style.peak_detached { style.peak_gap } else { 0.0 };
+            let arc = radial_arc(cx, cy, rp + gap, a0, a1);
+            frame.stroke(
+                &arc,
+                canvas::Stroke::default()
+                    .with_width(style.peak_cap_height.max(1.0))
+                    .with_color(peak_color),
+            );
         }
     }
 
@@ -3085,13 +3387,91 @@ fn plot_rect(full: Rectangle) -> Rectangle {
 }
 
 fn freq_to_x(freq: f32, left: f32, width: f32) -> f32 {
-    let t = (((freq / FREQ_MIN_HZ).ln()) / LOG_SPAN).clamp(0.0, 1.0);
-    left + t * width
+    left + freq_to_t(freq) * width
 }
 
 fn db_to_y(db: f32, top: f32, height: f32) -> f32 {
-    let t = ((db - DB_FLOOR) / (DB_CEILING - DB_FLOOR)).clamp(0.0, 1.0);
-    top + (1.0 - t) * height
+    top + (1.0 - db_t(db)) * height
+}
+
+/// 电平归一化到 0..1(DB_FLOOR → 0,DB_CEILING → 1)。
+fn db_t(db: f32) -> f32 {
+    ((db - DB_FLOOR) / (DB_CEILING - DB_FLOOR)).clamp(0.0, 1.0)
+}
+
+/// 频谱显示电平:在 dB 归一化后施加 1/4 视觉增益。
+fn spectrum_t(db: f32) -> f32 {
+    (db_t(db) * SPECTRUM_GAIN).clamp(0.0, 1.0)
+}
+
+fn spectrum_to_y(db: f32, top: f32, height: f32) -> f32 {
+    top + (1.0 - spectrum_t(db)) * height
+}
+
+/// 对数频率轴归一化到 0..1。
+fn freq_to_t(freq: f32) -> f32 {
+    ((freq / FREQ_MIN_HZ).ln() / LOG_SPAN).clamp(0.0, 1.0)
+}
+
+/// 圆形频谱的几何:圆心、内半径与可用的径向长度。
+fn radial_geometry(plot: Rectangle) -> (f32, f32, f32, f32) {
+    let cx = plot.x + plot.width * 0.5;
+    let cy = plot.y + plot.height * 0.5;
+    let r_max = (plot.width.min(plot.height) * 0.5 - 16.0).max(8.0);
+    let r0 = (r_max * 0.30).max(5.0);
+    (cx, cy, r0, (r_max - r0).max(1.0))
+}
+
+/// 频段位置(0..1) → 弧度;0 从正上方开始顺时针一周。
+fn radial_angle(t: f32) -> f32 {
+    -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * t.clamp(0.0, 1.0)
+}
+
+fn radial_arc(cx: f32, cy: f32, radius: f32, start: f32, end: f32) -> canvas::Path {
+    canvas::Path::new(|p| {
+        p.arc(canvas::path::Arc {
+            center: Point::new(cx, cy),
+            radius,
+            start_angle: start.into(),
+            end_angle: end.into(),
+        });
+    })
+}
+
+/// 方块高度/间隔按绘图尺寸相对参考高度等比缩放。
+fn scaled_block(value: f32, dimension: f32) -> f32 {
+    (value * dimension / BLOCK_SCALE_REF_HEIGHT).max(1.0)
+}
+
+/// 非方块显示时让峰值帽下落更慢;方块显示保持原有速度。
+fn peak_hold_decay_scale(blocks: bool) -> f32 {
+    if blocks { 1.0 } else { PEAK_HOLD_SLOW_SCALE }
+}
+
+/// 线性布局的峰值帽:按设置高度绘制圆角矩形,`gap` 为与柱顶的间隔。
+fn draw_peak_cap(
+    frame: &mut CanvasFrame,
+    x: (f32, f32),
+    peak: f32,
+    plot: Rectangle,
+    color: Color,
+    rounding: f32,
+    cap: (f32, f32),
+) {
+    let py = spectrum_to_y(peak, plot.y, plot.height);
+    let (cap_height, gap) = cap;
+    // 高度设为 0 时仍保留 1px 细线,而不是让标记消失。
+    let cap = cap_height.max(1.0);
+    // 顶端峰值没有上方空间:贴顶保留标记,而不是让它消失。
+    let y1 = (py - gap.max(0.0)).max(plot.y + cap);
+    let y0 = (y1 - cap).max(plot.y);
+    let radius = rounding.round().clamp(0.0, 2.0);
+    fill_rounded(
+        frame,
+        Rectangle::new(Point::new(x.0, y0), Size::new(x.1 - x.0, y1 - y0)),
+        radius,
+        color,
+    );
 }
 
 /// 频谱柱渐变色(调色板驱动)。
@@ -3780,15 +4160,60 @@ fn spectrum_page(app: &SpectrumApp) -> Element<'static, Message> {
     let mut col: iced::widget::Column<'static, Message> =
         column![section_label("频谱")].spacing(6);
     col = col.push(
-        checkbox(s.peak_hold)
-            .label("Peak Hold 峰值保持")
-            .on_toggle(|_| Message::TogglePeakHold),
+        checkbox(s.style.peak_detached)
+            .label("峰值保持点")
+            .on_toggle(|_| Message::TogglePeakDetached),
     );
+    col = col.push(slider_row(
+        "保持点高度",
+        s.style.peak_cap_height,
+        0.0..=10.0,
+        1.0,
+        Message::SetPeakCapHeight,
+    ));
+    col = col.push(slider_row(
+        "保持点间隔",
+        s.style.peak_gap,
+        1.0..=10.0,
+        1.0,
+        Message::SetPeakGap,
+    ));
     col = col.push(
         checkbox(s.style.grid)
             .label("显示网格")
             .on_toggle(|_| Message::ToggleGrid),
     );
+    col = col.push(section_label("类型"));
+    col = col.push(
+        row![
+            text("布局")
+                .size(13.0)
+                .color(BTN_FG)
+                .font(CJK_FONT)
+                .width(Length::Fixed(64.0)),
+            spectrum_type_row(s.style.spectrum_type),
+        ]
+        .spacing(4),
+    );
+    col = col.push(
+        checkbox(s.style.blocks)
+            .label("方块显示（条形/圆形均生效）")
+            .on_toggle(|_| Message::ToggleBlocks),
+    );
+    col = col.push(slider_row(
+        "方块高度",
+        s.style.block_height,
+        1.0..=50.0,
+        1.0,
+        Message::SetBlockHeight,
+    ));
+    col = col.push(slider_row(
+        "方块间隔",
+        s.style.block_gap,
+        1.0..=50.0,
+        1.0,
+        Message::SetBlockGap,
+    ));
     col = col.push(section_label("样式"));
     col = col.push(
         row![
@@ -3829,6 +4254,13 @@ fn spectrum_page(app: &SpectrumApp) -> Element<'static, Message> {
         PickerId::Spectrum(ColorSlot::Peak),
         pal.peak,
         Message::ColorSlotReset(ColorSlot::Peak),
+    ));
+    col = col.push(color_picker_row(
+        app,
+        "峰值保持点色",
+        PickerId::Spectrum(ColorSlot::PeakHold),
+        pal.peak_hold,
+        Message::ColorSlotReset(ColorSlot::PeakHold),
     ));
     col = col.push(slider_row(
         "柱条圆角",
@@ -4146,6 +4578,21 @@ fn screensaver_page(s: &Settings) -> Element<'static, Message> {
         col = col.push(r);
     }
     col.into()
+}
+
+fn spectrum_type_row(current: SpectrumType) -> row::Row<'static, Message> {
+    row(SpectrumType::ALL
+        .iter()
+        .map(|&t| {
+            choice(
+                t.name(),
+                t == current,
+                Message::SetSpectrumType(t),
+            )
+            .into()
+        })
+        .collect::<Vec<_>>())
+    .spacing(4)
 }
 
 fn for_row_presets(current: ThemePreset) -> row::Row<'static, Message> {
