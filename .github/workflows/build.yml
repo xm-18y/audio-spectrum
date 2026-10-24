@@ -2,9 +2,7 @@ name: build
 
 on:
   push:
-    branches: ["**"]
     tags: ["v*"]
-  workflow_dispatch:
 
 concurrency:
   group: build-${{ github.ref }}
@@ -120,12 +118,7 @@ jobs:
   release:
     name: publish download links
     needs: [prepare, build]
-    # tag push → 该 tag 的正式 release;main/手动 → 滚动 prerelease latest(稳定链接);
-    # 其他分支的 push 只出 artifacts。
-    if: >-
-      startsWith(github.ref, 'refs/tags/v') ||
-      github.event_name == 'workflow_dispatch' ||
-      github.ref == 'refs/heads/main'
+    # 仅 tag push 触发 → 发布该 tag 的正式 release。
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -138,47 +131,25 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Publish release (tag) or rolling prerelease (latest)
+      - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            # 正式版:发布到触发构建的 tag 上,标题附版本标签。
-            TAG="${GITHUB_REF#refs/tags/}"
-            LABEL="${{ needs.prepare.outputs.version_label }}"
-            gh release create "$TAG" \
-              --title "${LABEL}" \
-              --notes "提交:\`${GITHUB_SHA}\`\n版本标签:\`${LABEL}\`\n运行记录:${REPO_URL}/actions/runs/${GITHUB_RUN_ID}" \
-              dist/*
-          else
-            # 滚动标签:同一 URL 永远指向最新构建。
-            TAG="latest"
-            gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-            cat > notes.md <<EOF
-          ## audio-spectrum 构建产物
-
-          - 提交:\`${GITHUB_SHA}\`
-          - 运行记录:${REPO_URL}/actions/runs/${GITHUB_RUN_ID}
-          - 触发:\`${GITHUB_EVENT_NAME}\`
-          EOF
-            gh release create "$TAG" \
-              --prerelease \
-              --title "${{ needs.prepare.outputs.version_label }}" \
-              --notes-file notes.md \
-              dist/*
-          fi
+          # 正式版:发布到触发构建的 tag 上,标题附版本标签。
+          TAG="${GITHUB_REF#refs/tags/}"
+          LABEL="${{ needs.prepare.outputs.version_label }}"
+          gh release create "$TAG" \
+            --title "${LABEL}" \
+            --notes "提交:\`${GITHUB_SHA}\`\n版本标签:\`${LABEL}\`\n运行记录:${REPO_URL}/actions/runs/${GITHUB_RUN_ID}" \
+            dist/*
 
       - name: Job summary with download links
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          else
-            TAG="latest"
-          fi
+          TAG="${GITHUB_REF#refs/tags/}"
           {
             echo "## 下载链接(${TAG})"
             echo ""

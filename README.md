@@ -135,12 +135,12 @@ crates/
 
 GitHub Actions(`.github/workflows/build.yml`)三平台构建:
 
-- **触发**:每次 push + 手动 `workflow_dispatch`
+- **触发方式**:推送 `v*` 格式的 tag(如 `git tag v0.2.0 && git push origin v0.2.0`),
+  构建完成后自动在该 tag 上创建正式 Release 并上传三平台产物
 - **矩阵**:macOS arm64(`.app` zip)、Windows x64(zip)、Linux x64(tar.gz),
   含 `cargo test` 与性能预算断言(CI 无音频硬件时自动跳过 SCK 实机集成测试)
-- **下载链接**:main 分支/手动触发 → 滚动 prerelease `latest`(链接永久稳定);
-  推送 `v*` tag → 该 tag 的正式 Release;
-  其他分支 → run 级 Artifacts
+- **产物命名**:`audio-spectrum-v<版本>-<UTC日期>-<平台>.zip/tar.gz`
+  (版本号取自 `Cargo.toml`,日期标签由 prepare 作业统一生成)
 - **应用内更新**:已安装的客户端在「关于」菜单可一键检查/下载/换装
   (资产命名与平台匹配规则见 `crates/app/src/updater.rs`)
 - 首次接入:
