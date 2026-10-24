@@ -14,6 +14,8 @@ mod macos_menu;
 #[cfg(target_os = "macos")]
 pub use macos_menu::{MenuCommand, NativeMenu};
 
+pub mod autostart;
+
 // ---------------------------------------------------------------------------
 // 视图 / 衰减
 // ---------------------------------------------------------------------------
@@ -727,6 +729,9 @@ pub struct Settings {
     pub default_fullscreen: bool,
     /// 记住上次窗口尺寸与位置。
     pub remember_window: bool,
+    /// 开机自启动(切换时写入系统;Windows 注册表 Run 键 / macOS
+    /// LaunchAgent / Linux XDG autostart,见 [`autostart`])。
+    pub launch_at_login: bool,
     /// 显示性能 HUD(右下角浮层;默认关闭,纯视觉)。
     pub show_hud: bool,
     /// 上次窗口矩形 [x, y, w, h]。
@@ -751,6 +756,7 @@ impl Default for Settings {
             background: BackgroundSettings::default(),
             default_fullscreen: false,
             remember_window: false,
+            launch_at_login: false,
             show_hud: false,
             window_rect: None,
             waveform: WaveformSettings::default(),

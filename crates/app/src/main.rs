@@ -21,8 +21,8 @@
 use audio_spectrum_app::{
     BackgroundSettings, DecayChoice, GlowLayout, Palette, ParticleEmission, ScaleMode,
     ScreensaverStyle, Settings, ThemePreset, ViewMode, WaveformColor, BAND_COUNT_MAX,
-    BAND_COUNT_MIN, band_color as palette_band_color, blur_rgba, load as load_settings,
-    pin_windows_wgpu_backend, resolve_palette, save as save_settings,
+    BAND_COUNT_MIN, autostart, band_color as palette_band_color, blur_rgba,
+    load as load_settings, pin_windows_wgpu_backend, resolve_palette, save as save_settings,
     spectro_pixels,
 };
 #[cfg(target_os = "macos")]
@@ -175,6 +175,8 @@ enum Message {
     SetBlur(f32),
     ToggleFullscreenDefault,
     ToggleRememberWindow,
+    /// 「设置」菜单:开机自启动(写系统,见 autostart 模块)。
+    ToggleLaunchAtLogin,
     // —— 关于 / 更新 ——
     /// 打开「关于」窗口(菜单栏末尾「关于」下拉子项 / macOS 原生菜单)。
     OpenAbout,
@@ -192,8 +194,8 @@ enum Message {
 #[cfg(not(target_os = "macos"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuTab {
-    View,
     Source,
+    Settings,
     About,
 }
 
@@ -666,6 +668,13 @@ impl SpectrumApp {
         Task::none()
     }
 
+    /// 开机自启动:写系统(注册表/LaunchAgent/XDG autostart)并持久化。
+    fn do_toggle_launch_at_login(&mut self) {
+        self.settings.launch_at_login = !self.settings.launch_at_login;
+        autostart::set_enabled(self.settings.launch_at_login);
+        self.mark_dirty();
+    }
+
     /// 键盘:S 切换 频谱/语谱,Space 冻结/解冻,⌘,/Ctrl+, 设置,F11 全屏
     /// (仅非 macOS),ESC 退全屏/关设置窗/收起菜单栏下拉(设计共识)。
     fn on_key(&mut self, event: keyboard::Event) -> Task<Message> {
@@ -842,6 +851,10 @@ impl SpectrumApp {
             MenuCommand::ToggleHud => {
                 self.settings.show_hud = !self.settings.show_hud;
                 self.mark_dirty();
+                Task::none()
+            }
+            MenuCommand::ToggleLaunchAtLogin => {
+                self.do_toggle_launch_at_login();
                 Task::none()
             }
             MenuCommand::SelectSource(info) => self.do_select_source(info),
@@ -1401,6 +1414,7 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
             | Message::ToggleFrozen
             | Message::ToggleAlwaysOnTop
             | Message::ToggleRememberWindow
+            | Message::ToggleLaunchAtLogin
             | Message::ToggleHud
             | Message::SetBandCount(_)
             | Message::SetDecay(_)
@@ -1449,6 +1463,7 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
                             app.settings.always_on_top,
                             app.frozen,
                             app.settings.show_hud,
+                            app.settings.launch_at_login,
                         );
                         polled
                     }
@@ -1841,6 +1856,10 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
             app.mark_dirty();
             Task::none()
         }
+        Message::ToggleLaunchAtLogin => {
+            app.do_toggle_launch_at_login();
+            Task::none()
+        }
     }
 }
 
@@ -1928,7 +1947,7 @@ fn view(app: &SpectrumApp) -> Element<'_, Message> {
 
     let mut layers: Vec<Element<'_, Message>> = vec![top.into()];
 
-    // 右下性能 HUD(默认关;视图菜单可开)。
+    // 右下性能 HUD(默认关;设置菜单可开)。
     if app.settings.show_hud {
         let hud = format!(
             "{:.2}ms/帧 · {:.0}fps · ≈{:.1}% CPU",
@@ -3127,17 +3146,22 @@ const MENU_TAB_WIDTH: f32 = 56.0;
 #[cfg(not(target_os = "macos"))]
 const MENU_BAR_BG: Color = Color::from_rgb(0.07, 0.08, 0.11);
 
-/// 应用菜单栏(非 macOS):视图 / 声源 两个下拉菜单 + 设置直达按钮。
-/// 全屏时整体隐藏(见 view),保持纯净画面。
+/// 应用菜单栏(非 macOS):声源 / 设置 两个下拉菜单 + 特效直达按钮,
+/// 末尾为「关于」下拉。全屏时整体隐藏(见 view),保持纯净画面。
 #[cfg(not(target_os = "macos"))]
 fn menu_bar(app: &SpectrumApp) -> Element<'_, Message> {
     let mut bar = row![].spacing(2);
-    for (tab, label) in [(MenuTab::View, "视图"), (MenuTab::Source, "声源")] {
-        let open = app.open_menu == Some(tab);
-        bar = bar.push(menu_tab(label, open, Message::ToggleMenu(tab)));
-    }
-    // 特效:直达按钮(高亮 = 特效窗体已打开;ADR-0005 取代设置)。
+    let source_open = app.open_menu == Some(MenuTab::Source);
+    bar = bar.push(menu_tab("声源", source_open, Message::ToggleMenu(MenuTab::Source)));
+    // 特效:直达按钮(高亮 = 特效窗体已打开;ADR-0005:原设置窗并入)。
     bar = bar.push(menu_tab("特效", app.effects_open, Message::OpenEffects));
+    // 设置:原「视图」下拉(全屏/置顶/开机启动等),排在「关于」前。
+    let settings_open = app.open_menu == Some(MenuTab::Settings);
+    bar = bar.push(menu_tab(
+        "设置",
+        settings_open,
+        Message::ToggleMenu(MenuTab::Settings),
+    ));
     // 关于:末尾下拉(子项:关于 / 检测更新);有待装新版时右上角红点。
     let about_open = app.open_menu == Some(MenuTab::About);
     let about_tab = menu_tab("关于", about_open, Message::ToggleMenu(MenuTab::About));
@@ -3205,7 +3229,7 @@ fn menu_tab(label: &str, open: bool, on_press: Message) -> button::Button<'stati
 fn dropdown(app: &SpectrumApp, tab: MenuTab) -> Element<'_, Message> {
     let s = &app.settings;
     let items: Vec<Element<'_, Message>> = match tab {
-        MenuTab::View => vec![
+        MenuTab::Settings => vec![
             toggle_item("全屏", app.fullscreen, Message::ToggleFullscreen),
             toggle_item("冻结显示", app.frozen, Message::ToggleFrozen),
             toggle_item("性能信息", s.show_hud, Message::ToggleHud),
@@ -3221,6 +3245,8 @@ fn dropdown(app: &SpectrumApp, tab: MenuTab) -> Element<'_, Message> {
                 s.remember_window,
                 Message::ToggleRememberWindow
             ),
+            section_label("系统").into(),
+            toggle_item("开机启动", s.launch_at_login, Message::ToggleLaunchAtLogin),
         ],
         MenuTab::About => {
             let mut items: Vec<Element<'_, Message>> = vec![
@@ -3260,10 +3286,11 @@ fn dropdown(app: &SpectrumApp, tab: MenuTab) -> Element<'_, Message> {
         .padding(10.0)
         .style(|_theme: &Theme| panel_style());
 
-    // 锚点:菜单栏正下方,左缘对齐对应菜单项(视图/声源/设置/关于顺次排布)。
+    // 锚点:菜单栏正下方,左缘对齐对应菜单项(声源/设置/关于顺次排布,
+    // 「特效」为直达按钮无下拉,但其占位宽度计入「设置」偏移)。
     let left = match tab {
-        MenuTab::View => 6.0,
-        MenuTab::Source => 6.0 + MENU_TAB_WIDTH,
+        MenuTab::Source => 6.0,
+        MenuTab::Settings => 6.0 + 2.0 * MENU_TAB_WIDTH,
         MenuTab::About => 6.0 + 3.0 * MENU_TAB_WIDTH,
     };
     container(panel)
@@ -4166,6 +4193,10 @@ fn cjk_font_bytes() -> Option<Vec<u8>> {
 fn main() -> iced::Result {
     pin_windows_wgpu_backend();
     let settings = load_settings();
+    // 开机自启动为开启态时启动即重写一次系统项:exe 被移动/换装后路径自愈。
+    if settings.launch_at_login {
+        autostart::set_enabled(true);
+    }
     // 清理上次自更新换装的残留(旧版 .old 与临时目录)。
     updater::cleanup_stale();
 

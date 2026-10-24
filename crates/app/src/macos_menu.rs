@@ -33,6 +33,7 @@ pub enum MenuCommand {
     ToggleAlwaysOnTop,
     ToggleFrozen,
     ToggleHud,
+    ToggleLaunchAtLogin,
     SelectSource(DeviceInfo),
 }
 
@@ -52,6 +53,7 @@ const TAG_FULLSCREEN: isize = 10;
 const TAG_PIN: isize = 11;
 const TAG_FREEZE: isize = 12;
 const TAG_HUD: isize = 13;
+const TAG_LAUNCH_AT_LOGIN: isize = 14;
 const TAG_ABOUT: isize = 100;
 const TAG_CHECK_UPDATE: isize = 101;
 const TAG_SOURCE: isize = 1000;
@@ -86,6 +88,7 @@ define_class!(
                 TAG_PIN => Some(MenuCommand::ToggleAlwaysOnTop),
                 TAG_FREEZE => Some(MenuCommand::ToggleFrozen),
                 TAG_HUD => Some(MenuCommand::ToggleHud),
+                TAG_LAUNCH_AT_LOGIN => Some(MenuCommand::ToggleLaunchAtLogin),
                 n if n >= TAG_SOURCE => guard
                     .sources
                     .get((n - TAG_SOURCE) as usize)
@@ -163,6 +166,7 @@ struct MenuItems {
     pin: Retained<NSMenuItem>,
     freeze: Retained<NSMenuItem>,
     hud: Retained<NSMenuItem>,
+    launch_at_login: Retained<NSMenuItem>,
 }
 
 /// 已安装的原生菜单;持有 handler 与需要同步状态的项。
@@ -199,8 +203,10 @@ impl NativeMenu {
         let pin = command_item(mtm, "窗口置顶", TAG_PIN, None, &handler);
         let freeze = command_item(mtm, "冻结显示", TAG_FREEZE, None, &handler);
         let hud = command_item(mtm, "显示性能信息", TAG_HUD, None, &handler);
+        let launch_at_login =
+            command_item(mtm, "开机启动", TAG_LAUNCH_AT_LOGIN, None, &handler);
 
-        // 视图菜单
+        // 设置菜单(原「视图」:八视图 + 窗口/系统开关)
         let view_menu = NSMenu::new(mtm);
         for item in &views {
             view_menu.addItem(item);
@@ -210,8 +216,9 @@ impl NativeMenu {
         view_menu.addItem(&pin);
         view_menu.addItem(&freeze);
         view_menu.addItem(&hud);
+        view_menu.addItem(&launch_at_login);
         let view_item = NSMenuItem::new(mtm);
-        view_item.setTitle(&ns_str("视图"));
+        view_item.setTitle(&ns_str("设置"));
         view_item.setSubmenu(Some(&view_menu));
 
         // 声源菜单(内容随设备列表重建)
@@ -296,6 +303,7 @@ impl NativeMenu {
                 pin,
                 freeze,
                 hud,
+                launch_at_login,
             },
             source_menu,
             source_signature: String::new(),
@@ -311,7 +319,15 @@ impl NativeMenu {
     }
 
     /// 刷新勾选态(每帧调用,开销可忽略)。
-    pub fn sync(&self, view: ViewMode, fullscreen: bool, pin: bool, frozen: bool, hud: bool) {
+    pub fn sync(
+        &self,
+        view: ViewMode,
+        fullscreen: bool,
+        pin: bool,
+        frozen: bool,
+        hud: bool,
+        launch_at_login: bool,
+    ) {
         let on = NSControlStateValueOn;
         let off = NSControlStateValueOff;
         for (i, item) in self.items.views.iter().enumerate() {
@@ -323,6 +339,9 @@ impl NativeMenu {
         self.items.pin.setState(if pin { on } else { off });
         self.items.freeze.setState(if frozen { on } else { off });
         self.items.hud.setState(if hud { on } else { off });
+        self.items
+            .launch_at_login
+            .setState(if launch_at_login { on } else { off });
     }
 
     /// 设备列表或当前声源变化时重建声源子菜单(签名去抖)。
