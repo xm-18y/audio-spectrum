@@ -15,6 +15,7 @@ mod macos_menu;
 pub use macos_menu::{MenuCommand, NativeMenu};
 
 pub mod autostart;
+pub mod keep_awake;
 
 // ---------------------------------------------------------------------------
 // 视图 / 衰减
@@ -732,6 +733,8 @@ pub struct Settings {
     /// 开机自启动(切换时写入系统;Windows 注册表 Run 键 / macOS
     /// LaunchAgent / Linux XDG autostart,见 [`autostart`])。
     pub launch_at_login: bool,
+    /// 阻止系统休眠(切换时生效,进程退出自动解除,见 [`keep_awake`])。
+    pub prevent_sleep: bool,
     /// 显示性能 HUD(右下角浮层;默认关闭,纯视觉)。
     pub show_hud: bool,
     /// 上次窗口矩形 [x, y, w, h]。
@@ -757,6 +760,7 @@ impl Default for Settings {
             default_fullscreen: false,
             remember_window: false,
             launch_at_login: false,
+            prevent_sleep: false,
             show_hud: false,
             window_rect: None,
             waveform: WaveformSettings::default(),

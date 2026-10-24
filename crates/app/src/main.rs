@@ -21,7 +21,7 @@
 use audio_spectrum_app::{
     BackgroundSettings, DecayChoice, GlowLayout, Palette, ParticleEmission, ScaleMode,
     ScreensaverStyle, Settings, ThemePreset, ViewMode, WaveformColor, BAND_COUNT_MAX,
-    BAND_COUNT_MIN, autostart, band_color as palette_band_color, blur_rgba,
+    BAND_COUNT_MIN, autostart, band_color as palette_band_color, blur_rgba, keep_awake,
     load as load_settings, pin_windows_wgpu_backend, resolve_palette, save as save_settings,
     spectro_pixels,
 };
@@ -177,6 +177,8 @@ enum Message {
     ToggleRememberWindow,
     /// 「设置」菜单:开机自启动(写系统,见 autostart 模块)。
     ToggleLaunchAtLogin,
+    /// 「设置」菜单:阻止系统休眠(见 keep_awake 模块)。
+    TogglePreventSleep,
     // —— 关于 / 更新 ——
     /// 打开「关于」窗口(菜单栏末尾「关于」下拉子项 / macOS 原生菜单)。
     OpenAbout,
@@ -675,6 +677,13 @@ impl SpectrumApp {
         self.mark_dirty();
     }
 
+    /// 阻止休眠:三平台电源抑制(见 keep_awake 模块)并持久化。
+    fn do_toggle_prevent_sleep(&mut self) {
+        self.settings.prevent_sleep = !self.settings.prevent_sleep;
+        keep_awake::set_enabled(self.settings.prevent_sleep);
+        self.mark_dirty();
+    }
+
     /// 键盘:S 切换 频谱/语谱,Space 冻结/解冻,⌘,/Ctrl+, 设置,F11 全屏
     /// (仅非 macOS),ESC 退全屏/关设置窗/收起菜单栏下拉(设计共识)。
     fn on_key(&mut self, event: keyboard::Event) -> Task<Message> {
@@ -855,6 +864,10 @@ impl SpectrumApp {
             }
             MenuCommand::ToggleLaunchAtLogin => {
                 self.do_toggle_launch_at_login();
+                Task::none()
+            }
+            MenuCommand::TogglePreventSleep => {
+                self.do_toggle_prevent_sleep();
                 Task::none()
             }
             MenuCommand::SelectSource(info) => self.do_select_source(info),
@@ -1415,6 +1428,7 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
             | Message::ToggleAlwaysOnTop
             | Message::ToggleRememberWindow
             | Message::ToggleLaunchAtLogin
+            | Message::TogglePreventSleep
             | Message::ToggleHud
             | Message::SetBandCount(_)
             | Message::SetDecay(_)
@@ -1464,6 +1478,7 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
                             app.frozen,
                             app.settings.show_hud,
                             app.settings.launch_at_login,
+                            app.settings.prevent_sleep,
                         );
                         polled
                     }
@@ -1858,6 +1873,10 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
         }
         Message::ToggleLaunchAtLogin => {
             app.do_toggle_launch_at_login();
+            Task::none()
+        }
+        Message::TogglePreventSleep => {
+            app.do_toggle_prevent_sleep();
             Task::none()
         }
     }
@@ -3247,6 +3266,7 @@ fn dropdown(app: &SpectrumApp, tab: MenuTab) -> Element<'_, Message> {
             ),
             section_label("系统").into(),
             toggle_item("开机启动", s.launch_at_login, Message::ToggleLaunchAtLogin),
+            toggle_item("阻止休眠", s.prevent_sleep, Message::TogglePreventSleep),
         ],
         MenuTab::About => {
             let mut items: Vec<Element<'_, Message>> = vec![
@@ -4197,6 +4217,10 @@ fn main() -> iced::Result {
     if settings.launch_at_login {
         autostart::set_enabled(true);
     }
+    // 阻止休眠为开启态时启动即恢复抑制(开关随设置持久化)。
+    if settings.prevent_sleep {
+        keep_awake::set_enabled(true);
+    }
     // 清理上次自更新换装的残留(旧版 .old 与临时目录)。
     updater::cleanup_stale();
 
@@ -4246,5 +4270,9 @@ fn main() -> iced::Result {
         app = app.font(bytes);
     }
 
-    app.run()
+    let result = app.run();
+    // 正常退出时解除休眠抑制(Linux 需 kill 掉 systemd-inhibit 子进程;
+    // Windows/macOS 的抑制本随进程消亡,复位仅为对称)。
+    keep_awake::set_enabled(false);
+    result
 }

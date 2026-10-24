@@ -34,6 +34,7 @@ pub enum MenuCommand {
     ToggleFrozen,
     ToggleHud,
     ToggleLaunchAtLogin,
+    TogglePreventSleep,
     SelectSource(DeviceInfo),
 }
 
@@ -54,6 +55,7 @@ const TAG_PIN: isize = 11;
 const TAG_FREEZE: isize = 12;
 const TAG_HUD: isize = 13;
 const TAG_LAUNCH_AT_LOGIN: isize = 14;
+const TAG_PREVENT_SLEEP: isize = 15;
 const TAG_ABOUT: isize = 100;
 const TAG_CHECK_UPDATE: isize = 101;
 const TAG_SOURCE: isize = 1000;
@@ -89,6 +91,7 @@ define_class!(
                 TAG_FREEZE => Some(MenuCommand::ToggleFrozen),
                 TAG_HUD => Some(MenuCommand::ToggleHud),
                 TAG_LAUNCH_AT_LOGIN => Some(MenuCommand::ToggleLaunchAtLogin),
+                TAG_PREVENT_SLEEP => Some(MenuCommand::TogglePreventSleep),
                 n if n >= TAG_SOURCE => guard
                     .sources
                     .get((n - TAG_SOURCE) as usize)
@@ -167,6 +170,7 @@ struct MenuItems {
     freeze: Retained<NSMenuItem>,
     hud: Retained<NSMenuItem>,
     launch_at_login: Retained<NSMenuItem>,
+    prevent_sleep: Retained<NSMenuItem>,
 }
 
 /// 已安装的原生菜单;持有 handler 与需要同步状态的项。
@@ -205,6 +209,8 @@ impl NativeMenu {
         let hud = command_item(mtm, "显示性能信息", TAG_HUD, None, &handler);
         let launch_at_login =
             command_item(mtm, "开机启动", TAG_LAUNCH_AT_LOGIN, None, &handler);
+        let prevent_sleep =
+            command_item(mtm, "阻止休眠", TAG_PREVENT_SLEEP, None, &handler);
 
         // 设置菜单(原「视图」:八视图 + 窗口/系统开关)
         let view_menu = NSMenu::new(mtm);
@@ -216,7 +222,9 @@ impl NativeMenu {
         view_menu.addItem(&pin);
         view_menu.addItem(&freeze);
         view_menu.addItem(&hud);
+        view_menu.addItem(&NSMenuItem::separatorItem(mtm));
         view_menu.addItem(&launch_at_login);
+        view_menu.addItem(&prevent_sleep);
         let view_item = NSMenuItem::new(mtm);
         view_item.setTitle(&ns_str("设置"));
         view_item.setSubmenu(Some(&view_menu));
@@ -304,6 +312,7 @@ impl NativeMenu {
                 freeze,
                 hud,
                 launch_at_login,
+                prevent_sleep,
             },
             source_menu,
             source_signature: String::new(),
@@ -327,6 +336,7 @@ impl NativeMenu {
         frozen: bool,
         hud: bool,
         launch_at_login: bool,
+        prevent_sleep: bool,
     ) {
         let on = NSControlStateValueOn;
         let off = NSControlStateValueOff;
@@ -342,6 +352,9 @@ impl NativeMenu {
         self.items
             .launch_at_login
             .setState(if launch_at_login { on } else { off });
+        self.items
+            .prevent_sleep
+            .setState(if prevent_sleep { on } else { off });
     }
 
     /// 设备列表或当前声源变化时重建声源子菜单(签名去抖)。
