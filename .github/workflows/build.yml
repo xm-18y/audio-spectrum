@@ -148,7 +148,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             LABEL="${{ needs.prepare.outputs.version_label }}"
             gh release create "$TAG" \
-              --title "audio-spectrum ${TAG} (${LABEL})" \
+              --title "${LABEL}" \
               --notes "提交:\`${GITHUB_SHA}\`\n版本标签:\`${LABEL}\`\n运行记录:${REPO_URL}/actions/runs/${GITHUB_RUN_ID}" \
               dist/*
           else
@@ -164,7 +164,7 @@ jobs:
           EOF
             gh release create "$TAG" \
               --prerelease \
-              --title "audio-spectrum ${{ needs.prepare.outputs.version_label }}" \
+              --title "${{ needs.prepare.outputs.version_label }}" \
               --notes-file notes.md \
               dist/*
           fi
