@@ -30,10 +30,11 @@
 
 ```bash
 cargo run -p audio-spectrum-app   # macOS 首次运行会请求麦克风权限
-# 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻,⌘, = 设置,
-# F11 = 全屏(仅 Windows/Linux;macOS 用 ⌘F),双击 = 全屏⇄窗口,ESC 关窗/退全屏
-# 配置入口:原生菜单栏(macOS)/ 应用菜单栏(Windows/Linux,末尾「关于」
-#   按钮独立窗口打开);macOS「关于 audio-spectrum…」在原生应用菜单;设置存于
+# 快捷键:S = 循环切换视图(频谱→语谱→波形→粒子→光效→CD→静态→屏保),
+#   Space = 冻结/解冻,⌘, = 特效窗体,
+#   F11 = 全屏(仅 Windows/Linux;macOS 用 ⌘F),双击 = 全屏⇄窗口,ESC 关窗/退全屏
+# 配置入口:特效窗体(菜单栏「特效」/【视图】菜单「特效…」/⌘,);
+#   macOS「关于 audio-spectrum…」在原生应用菜单;设置存于
 #   macOS ~/Library/Application Support/audio-spectrum/settings.ron
 #   Windows %APPDATA%\audio-spectrum\settings.ron · Linux ~/.config/audio-spectrum/
 scripts/bundle-macos.sh       # 打包 .app(Dock/启动台图标 + Info.plist + 麦克风用途声明)
@@ -62,9 +63,10 @@ crates/
 │             + Peak Hold)。无 I/O、无 FFI，全部行为测试覆盖。
 ├── capture   CaptureBackend：cpal 输入采集(三平台)+ 音频线程回调(只写环缓冲，
 │             ADR-0002)→ 归一化(f32 / 48kHz / 单声道)→ ringbuf SPSC。
-└── app       iced 壳(Elm 架构)：声源选择、断线自动 Reconnect、深色频谱画布
-             (canvas：渐变柱 + Peak Hold 线 + 频率/dB 网格)、常驻 60fps 重绘
-             (画布在每次重绘请求时发布 Frame 消息，自维持 vsync 帧循环)。
+└── app       iced 壳(Elm 架构):声源选择、断线自动 Reconnect、八视图画布
+             (频谱/语谱/波形/粒子/光效/CD/静态/屏保,共享 Bass Level 律动)、
+             特效窗体(9 tab 归拢全部视图配置,ADR-0005)、常驻 60fps 重绘
+             (画布在每次重绘请求时发布 Frame 消息,自维持 vsync 帧循环)。
 ```
 
 线程模型(ADR-0002):音频回调只写环缓冲,不分配不加锁;FFT 在 UI 线程每帧执行
@@ -72,6 +74,15 @@ crates/
 
 ## 状态
 
+- ✅ v0.8.0 八视图 + 特效窗体:视图泛化为有序清单(频谱 → 语谱 → 波形 →
+  粒子 → 光效 → CD → 静态 → 屏保),S 键循环全部、菜单/tab 同源联动;
+  新增四个音乐响应 Effect(波形吃原始样本帧,粒子/光效/CD 由 core 新
+  共享 Bass Level 同步律动)与两个非响应视图(静态 = 通用背景图独占,
+  屏保 = 不监听音源的六风格动画:变幻线/彩带/极光/管道/气泡/飞越星空);
+  【视图】菜单加「特效…」入口,特效窗体 9 tab(八视图 + 通用)归拢
+  全部视图配置:频段数/衰减速度/Peak Hold/网格/样式 移入频谱 tab,
+  设置窗取消(背景图进「通用」页),术语与决策见 GLOSSARY.md
+  Views and Effects 节与 docs/adr/0005
 - ✅ v0.7.0 关于/检测更新双窗口 + 应用内更新:菜单栏末尾「关于」下拉含
   「关于」「检测更新」两个子项(macOS 为原生菜单「关于 audio-spectrum /
   检测更新…」),各自打开独立窗口——关于窗:程序图标、名称-版本号
@@ -140,6 +151,15 @@ GitHub Actions(`.github/workflows/build.yml`)三平台构建:
 
 ## 已知取舍
 
+- Windows 上 wgpu 后端钉到 DX12(`pin_windows_wgpu_backend`,用户设置的
+  `WGPU_BACKEND` 优先):AMD + 虚拟显示驱动环境下,Vulkan 交换链在切全屏时
+  返回 SurfaceError,iced 0.14 的 present 不容忍即 panic(DX12/GL 实测健康)。
+- 启动全屏不在创建窗口时应用,首帧后经 window::set_mode 进入(避免部分
+  驱动下创建即全屏的交换链异常,切换瞬间可能闪一下窗口模式)。
+  两项决策的完整诊断见 docs/adr/0006。
+- iced canvas 无自定义 shader:光效律动用分层半透明圆叠加模拟辉光;
+  CD 整盘旋转靠 draw_image 的变换烘焙,圆形封面在加载时烘焙圆形 alpha
+  蒙版(canvas 无路径裁剪);屏保六风格内置固定构图,无参数可调。
 - 应用内更新:
   - 依赖 GitHub Releases 资产命名约定(`audio-spectrum-<标签>-<平台>.zip/tar.gz`,
     与 CI 产物一致);平台仅覆盖 CI 矩阵(Windows x64 / macOS arm64 / Linux x64),

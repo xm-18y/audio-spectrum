@@ -344,3 +344,30 @@ impl Smoother {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Bass Level
+// ---------------------------------------------------------------------------
+
+/// Number of lowest Bands averaged into the Bass Level (Q6: one shared scalar
+/// so every Effect pulses in sync).
+pub const BASS_LEVEL_BANDS: usize = 8;
+
+/// The shared per-frame loudness of the lowest Bands, normalized to 0..1
+/// (GLOSSARY: Bass Level). Squared dB mapping: silence collapses to 0, bass
+/// hits punch. Feeds Waveform accents and the Particles/Glow/Disc pulse.
+pub fn bass_level(bands_db: &[f32]) -> f32 {
+    if bands_db.is_empty() {
+        return 0.0;
+    }
+    let n = bands_db.len().clamp(1, BASS_LEVEL_BANDS);
+    let span = DB_CEILING - DB_FLOOR;
+    let sum: f32 = bands_db[..n]
+        .iter()
+        .map(|&db| {
+            let t = ((db - DB_FLOOR) / span).clamp(0.0, 1.0);
+            t * t
+        })
+        .sum();
+    (sum / n as f32).clamp(0.0, 1.0)
+}

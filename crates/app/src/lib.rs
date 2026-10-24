@@ -23,11 +23,296 @@ pub const BAND_COUNT_MIN: usize = 1;
 /// 频段数可调上限(对数轴上再细分已无意义)。
 pub const BAND_COUNT_MAX: usize = 255;
 
-/// 哪个画布处于激活态;`S` 键切换。
+/// 哪个画布处于激活态;`S` 键循环切换全部视图(GLOSSARY:View)。
+/// 有序清单:频谱 → 语谱 → 波形 → 粒子 → 光效 → CD → 静态 → 屏保。
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum ViewMode {
     Spectrum,
     Spectrogram,
+    Waveform,
+    Particles,
+    Glow,
+    Disc,
+    Static,
+    Screensaver,
+}
+
+impl ViewMode {
+    /// 循环/菜单/tab 共用的视图顺序(设计共识 v0.8.0)。
+    pub const ALL: &'static [ViewMode] = &[
+        ViewMode::Spectrum,
+        ViewMode::Spectrogram,
+        ViewMode::Waveform,
+        ViewMode::Particles,
+        ViewMode::Glow,
+        ViewMode::Disc,
+        ViewMode::Static,
+        ViewMode::Screensaver,
+    ];
+
+    /// 菜单/tab 显示名。
+    pub fn name(self) -> &'static str {
+        match self {
+            ViewMode::Spectrum => "频谱",
+            ViewMode::Spectrogram => "语谱",
+            ViewMode::Waveform => "波形",
+            ViewMode::Particles => "粒子",
+            ViewMode::Glow => "光效",
+            ViewMode::Disc => "CD",
+            ViewMode::Static => "静态",
+            ViewMode::Screensaver => "屏保",
+        }
+    }
+
+    /// `S` 键循环:清单中的下一个(末尾回绕)。
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|&v| v == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 各视图选项(per-View 设置节;旧 settings.ron 缺节取默认,ADR-0005)
+// ---------------------------------------------------------------------------
+
+/// 波形视图的配色来源。
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum WaveformColor {
+    /// 按幅度取主题渐变色(响处偏顶色)。
+    Gradient,
+    /// 固定顶色。
+    Top,
+    /// 固定底色。
+    Bottom,
+}
+
+impl WaveformColor {
+    pub const ALL: &'static [WaveformColor] = &[
+        WaveformColor::Gradient,
+        WaveformColor::Top,
+        WaveformColor::Bottom,
+    ];
+    pub fn name(self) -> &'static str {
+        match self {
+            WaveformColor::Gradient => "渐变",
+            WaveformColor::Top => "顶色",
+            WaveformColor::Bottom => "底色",
+        }
+    }
+}
+
+/// 波形视图选项(频谱 tab 平行;原始样本帧驱动,零采集改动)。
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+pub struct WaveformSettings {
+    /// 镜像填充(上下对称)否则单线。
+    pub mirrored: bool,
+    /// 线宽(px)。
+    pub line_width: f32,
+    /// 配色来源(自定义色设置时优先,见 `custom_color`)。
+    pub color: WaveformColor,
+    /// 幅度增益(原始样本振幅通常远小于 1;1 = 原样,16 = 小信号也撑满)。
+    pub gain: f32,
+    /// 自定义单色;None = 按 `color` 走主题色。
+    pub custom_color: Option<[u8; 3]>,
+}
+
+impl Default for WaveformSettings {
+    fn default() -> Self {
+        WaveformSettings {
+            mirrored: true,
+            line_width: 2.0,
+            color: WaveformColor::Gradient,
+            gain: 4.0,
+            custom_color: None,
+        }
+    }
+}
+
+/// 粒子发射样式。
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum ParticleEmission {
+    /// 底部喷泉:全屏宽度自底部喷发、受重力回落。
+    Fountain,
+    /// 环绕星环:绕中心旋转、半径随 Bass Level 脉动。
+    Ring,
+    /// 全屏星雨:自顶部匀速洒落,落底回炉。
+    Rain,
+    /// 星云:全屏缓慢漂移,Bass Level 呼吸膨胀。
+    Nebula,
+}
+
+impl ParticleEmission {
+    pub const ALL: &'static [ParticleEmission] = &[
+        ParticleEmission::Fountain,
+        ParticleEmission::Ring,
+        ParticleEmission::Rain,
+        ParticleEmission::Nebula,
+    ];
+    pub fn name(self) -> &'static str {
+        match self {
+            ParticleEmission::Fountain => "底部喷泉",
+            ParticleEmission::Ring => "环绕星环",
+            ParticleEmission::Rain => "全屏星雨",
+            ParticleEmission::Nebula => "星云",
+        }
+    }
+}
+
+/// 粒子视图选项。
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+pub struct ParticleSettings {
+    /// 粒子池上限。
+    pub count: u32,
+    /// 粒子基础半径(px)。
+    pub size: f32,
+    /// 拖尾长度系数(0 = 无拖尾)。
+    pub trail: f32,
+    pub emission: ParticleEmission,
+    /// 自定义单色;None = 按能量走主题渐变。
+    pub custom_color: Option<[u8; 3]>,
+}
+
+impl Default for ParticleSettings {
+    fn default() -> Self {
+        ParticleSettings {
+            count: 140,
+            size: 3.0,
+            trail: 1.0,
+            emission: ParticleEmission::Fountain,
+            custom_color: None,
+        }
+    }
+}
+
+/// 光效布局。
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum GlowLayout {
+    /// 径向:光斑绕中心圆环排布。
+    Radial,
+    /// 网格:光斑铺满画布。
+    Grid,
+    /// 随机:光斑随机散布全屏,缓慢漂移。
+    Random,
+}
+
+impl GlowLayout {
+    pub const ALL: &'static [GlowLayout] = &[
+        GlowLayout::Radial,
+        GlowLayout::Grid,
+        GlowLayout::Random,
+    ];
+    pub fn name(self) -> &'static str {
+        match self {
+            GlowLayout::Radial => "径向",
+            GlowLayout::Grid => "网格",
+            GlowLayout::Random => "随机",
+        }
+    }
+}
+
+/// 光效律动视图选项(iced canvas 无 shader:分层半透明圆模拟辉光)。
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+pub struct GlowSettings {
+    /// 光斑数量(1–64)。
+    pub count: u32,
+    pub layout: GlowLayout,
+    /// 脉动强度 0..1。
+    pub intensity: f32,
+    /// 色相漂移:光斑颜色随时间轮转主题渐变。
+    pub hue_drift: bool,
+    /// 自定义单色;None = 主题渐变(漂移)。
+    pub custom_color: Option<[u8; 3]>,
+}
+
+impl Default for GlowSettings {
+    fn default() -> Self {
+        GlowSettings {
+            count: 12,
+            layout: GlowLayout::Random,
+            intensity: 0.6,
+            hue_drift: true,
+            custom_color: None,
+        }
+    }
+}
+
+/// CD 视图选项(网易云式旋转唱片)。
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct DiscSettings {
+    /// 转速系数(1 = 基准 33⅓ rpm 观感)。
+    pub speed: f32,
+    /// Bass Level 律动幅度 0..1(缩放呼吸)。
+    pub pulse: f32,
+    /// 显示唱针。
+    pub tonearm: bool,
+    /// 封面图路径;None = 内置默认唱片图。
+    pub cover: Option<std::path::PathBuf>,
+    /// 圆形封面(加载时烘掊圆形 alpha 蒙版)否则方形。
+    pub round: bool,
+}
+
+impl Default for DiscSettings {
+    fn default() -> Self {
+        DiscSettings {
+            speed: 1.0,
+            pulse: 0.25,
+            tonearm: true,
+            cover: None,
+            round: true,
+        }
+    }
+}
+
+/// 屏保动画风格(Q12:六种锁定;Q13:无任何参数)。
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum ScreensaverStyle {
+    /// 变幻线(贝塞尔曲线族)。
+    Lines,
+    /// 彩带。
+    Ribbons,
+    /// 极光。
+    Aurora,
+    /// 管道(3D 随机行走,投影线段)。
+    Pipes,
+    /// 气泡。
+    Bubbles,
+    /// 飞越星空。
+    Starfield,
+}
+
+impl ScreensaverStyle {
+    pub const ALL: &'static [ScreensaverStyle] = &[
+        ScreensaverStyle::Lines,
+        ScreensaverStyle::Ribbons,
+        ScreensaverStyle::Aurora,
+        ScreensaverStyle::Pipes,
+        ScreensaverStyle::Bubbles,
+        ScreensaverStyle::Starfield,
+    ];
+    pub fn name(self) -> &'static str {
+        match self {
+            ScreensaverStyle::Lines => "变幻线",
+            ScreensaverStyle::Ribbons => "彩带",
+            ScreensaverStyle::Aurora => "极光",
+            ScreensaverStyle::Pipes => "管道",
+            ScreensaverStyle::Bubbles => "气泡",
+            ScreensaverStyle::Starfield => "飞越星空",
+        }
+    }
+}
+
+/// 屏保视图选项:仅风格选择(Q13/Q17:单选、无参数)。
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct ScreensaverSettings {
+    pub style: ScreensaverStyle,
+}
+
+impl Default for ScreensaverSettings {
+    fn default() -> Self {
+        ScreensaverSettings {
+            style: ScreensaverStyle::Lines,
+        }
+    }
 }
 
 /// 衰减速度档位(持久化形态;运行时映射到 `audio_spectrum_core::DecaySpeed`)。
@@ -258,6 +543,8 @@ pub struct BackgroundSettings {
     pub opacity: f32,
     /// 预烘焙盒式模糊半径(px);0 = 不模糊。设计共识:不做实时 shader。
     pub blur_px: u32,
+    /// 自定义背景色;None = 主题背景色。设了图片时图片优先。
+    pub color: Option<[u8; 3]>,
 }
 
 impl Default for BackgroundSettings {
@@ -267,6 +554,7 @@ impl Default for BackgroundSettings {
             mode: ScaleMode::Fill,
             opacity: 1.0,
             blur_px: 0,
+            color: None,
         }
     }
 }
@@ -443,6 +731,12 @@ pub struct Settings {
     pub show_hud: bool,
     /// 上次窗口矩形 [x, y, w, h]。
     pub window_rect: Option<[f32; 4]>,
+    /// 各视图选项(per-View 节;频谱的选项即上方平铺字段,ADR-0005)。
+    pub waveform: WaveformSettings,
+    pub particles: ParticleSettings,
+    pub glow: GlowSettings,
+    pub disc: DiscSettings,
+    pub screensaver: ScreensaverSettings,
 }
 
 impl Default for Settings {
@@ -459,9 +753,35 @@ impl Default for Settings {
             remember_window: false,
             show_hud: false,
             window_rect: None,
+            waveform: WaveformSettings::default(),
+            particles: ParticleSettings::default(),
+            glow: GlowSettings::default(),
+            disc: DiscSettings::default(),
+            screensaver: ScreensaverSettings::default(),
         }
     }
 }
+
+/// Windows 上把 wgpu 后端钉到 DX12(用户显式设置的 `WGPU_BACKEND` 优先)。
+///
+/// 缘由:AMD + 虚拟显示驱动环境下,wgpu 默认枚举先选 Vulkan,其交换链在
+/// 全屏切换时返回 SurfaceError,iced 0.14 的 present 不容忍即 panic;
+/// DX12/GL 实测健康(A.D.R.-0006 诊断记录)。
+#[cfg(target_os = "windows")]
+pub fn pin_windows_wgpu_backend() {
+    if std::env::var_os("WGPU_BACKEND").is_some() {
+        return;
+    }
+    // SAFETY:进程启动早期、任何线程创建之前调用;env 只写一次。
+    #[allow(unsafe_code)]
+    unsafe {
+        std::env::set_var("WGPU_BACKEND", "dx12");
+    }
+}
+
+/// 非 Windows 无需钉后端(macOS Metal / Linux 按默认枚举)。
+#[cfg(not(target_os = "windows"))]
+pub fn pin_windows_wgpu_backend() {}
 
 /// 平台惯例配置目录(`~/Library/Application Support` / `%APPDATA%` / `~/.config`)。
 pub fn config_dir() -> Option<std::path::PathBuf> {
@@ -524,5 +844,63 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
     match settings_path() {
         Some(p) => save_to(settings, &p),
         None => Err(std::io::Error::other("无法定位配置目录")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn view_mode_cycle_visits_all_eight_views() {
+        let mut seen = Vec::new();
+        let mut v = ViewMode::Spectrum;
+        for _ in 0..ViewMode::ALL.len() {
+            seen.push(v);
+            v = v.next();
+        }
+        assert_eq!(seen, ViewMode::ALL.to_vec());
+        // 一圈后回到起点。
+        assert_eq!(v, ViewMode::ALL[0]);
+    }
+
+    #[test]
+    fn view_names_are_unique() {
+        let mut names: Vec<_> = ViewMode::ALL.iter().map(|v| v.name()).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), ViewMode::ALL.len());
+    }
+
+    #[test]
+    fn old_settings_without_per_view_sections_load_with_defaults() {
+        // 旧版 settings.ron(无特效节):缺失字段走 struct 级 serde(default)。
+        let s: Settings =
+            ron::from_str("(view: Spectrogram, band_count: 64)").expect("旧配置应可解析");
+        assert_eq!(s.view, ViewMode::Spectrogram);
+        assert_eq!(s.band_count, 64);
+        assert_eq!(s.waveform, WaveformSettings::default());
+        assert_eq!(s.particles, ParticleSettings::default());
+        assert_eq!(s.glow, GlowSettings::default());
+        assert_eq!(s.disc, DiscSettings::default());
+        assert_eq!(s.screensaver, ScreensaverSettings::default());
+    }
+
+    #[test]
+    fn settings_round_trip_preserves_per_view_sections() {
+        let s = Settings {
+            view: ViewMode::Disc,
+            disc: DiscSettings {
+                speed: 1.5,
+                ..Default::default()
+            },
+            screensaver: ScreensaverSettings {
+                style: ScreensaverStyle::Aurora,
+            },
+            ..Default::default()
+        };
+        let text = ron::to_string(&s).expect("序列化");
+        let back: Settings = ron::from_str(&text).expect("反序列化");
+        assert_eq!(back, s);
     }
 }

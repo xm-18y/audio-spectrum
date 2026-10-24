@@ -25,7 +25,7 @@ use crate::ViewMode;
 /// 菜单栏发往 UI 线程的命令。
 #[derive(Debug)]
 pub enum MenuCommand {
-    OpenSettings,
+    OpenEffects,
     OpenAbout,
     OpenUpdate,
     SetView(ViewMode),
@@ -45,16 +45,15 @@ struct MenuShared {
 
 type Shared = Arc<Mutex<MenuShared>>;
 
-// tag 分配:1..10 固定项;≥1000 为声源索引。
-const TAG_SETTINGS: isize = 1;
-const TAG_VIEW_SPECTRUM: isize = 2;
-const TAG_VIEW_SPECTROGRAM: isize = 3;
-const TAG_FULLSCREEN: isize = 4;
-const TAG_PIN: isize = 5;
-const TAG_FREEZE: isize = 6;
-const TAG_HUD: isize = 7;
-const TAG_ABOUT: isize = 8;
-const TAG_CHECK_UPDATE: isize = 9;
+// tag 分配:1..=1 固定项;2..=9 视图;10..=19 其余固定项;≥1000 为声源索引。
+const TAG_EFFECTS: isize = 1;
+const TAG_VIEW_BASE: isize = 2;
+const TAG_FULLSCREEN: isize = 10;
+const TAG_PIN: isize = 11;
+const TAG_FREEZE: isize = 12;
+const TAG_HUD: isize = 13;
+const TAG_ABOUT: isize = 100;
+const TAG_CHECK_UPDATE: isize = 101;
 const TAG_SOURCE: isize = 1000;
 
 define_class!(
@@ -73,11 +72,16 @@ define_class!(
             let tag = sender.tag();
             let Ok(mut guard) = self.ivars().lock() else { return };
             let command = match tag {
-                TAG_SETTINGS => Some(MenuCommand::OpenSettings),
+                TAG_EFFECTS => Some(MenuCommand::OpenEffects),
                 TAG_ABOUT => Some(MenuCommand::OpenAbout),
                 TAG_CHECK_UPDATE => Some(MenuCommand::OpenUpdate),
-                TAG_VIEW_SPECTRUM => Some(MenuCommand::SetView(ViewMode::Spectrum)),
-                TAG_VIEW_SPECTROGRAM => Some(MenuCommand::SetView(ViewMode::Spectrogram)),
+                t if (TAG_VIEW_BASE..TAG_VIEW_BASE + ViewMode::ALL.len() as isize)
+                    .contains(&t) =>
+                {
+                    Some(MenuCommand::SetView(
+                        ViewMode::ALL[(t - TAG_VIEW_BASE) as usize],
+                    ))
+                }
                 TAG_FULLSCREEN => Some(MenuCommand::ToggleFullscreen),
                 TAG_PIN => Some(MenuCommand::ToggleAlwaysOnTop),
                 TAG_FREEZE => Some(MenuCommand::ToggleFrozen),
@@ -153,8 +157,8 @@ use std::convert::AsRef;
 
 /// 勾选态可同步的菜单项集合。
 struct MenuItems {
-    view_spectrum: Retained<NSMenuItem>,
-    view_spectrogram: Retained<NSMenuItem>,
+    /// 八视图项,顺序即 [`ViewMode::ALL`]。
+    views: Vec<Retained<NSMenuItem>>,
     fullscreen: Retained<NSMenuItem>,
     pin: Retained<NSMenuItem>,
     freeze: Retained<NSMenuItem>,
@@ -177,8 +181,20 @@ impl NativeMenu {
         let shared: Shared = Arc::new(Mutex::new(MenuShared::default()));
         let handler = MenuHandler::new(shared.clone());
 
-        let view_spectrum = command_item(mtm, "频谱", TAG_VIEW_SPECTRUM, Some("1"), &handler);
-        let view_spectrogram = command_item(mtm, "语谱", TAG_VIEW_SPECTROGRAM, Some("2"), &handler);
+        let view_keys = [Some("1"), Some("2")];
+        let views: Vec<Retained<NSMenuItem>> = ViewMode::ALL
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                command_item(
+                    mtm,
+                    v.name(),
+                    TAG_VIEW_BASE + i as isize,
+                    view_keys.get(i).copied().flatten(),
+                    &handler,
+                )
+            })
+            .collect();
         let fullscreen = command_item(mtm, "全屏", TAG_FULLSCREEN, Some("f"), &handler);
         let pin = command_item(mtm, "窗口置顶", TAG_PIN, None, &handler);
         let freeze = command_item(mtm, "冻结显示", TAG_FREEZE, None, &handler);
@@ -186,8 +202,9 @@ impl NativeMenu {
 
         // 视图菜单
         let view_menu = NSMenu::new(mtm);
-        view_menu.addItem(&view_spectrum);
-        view_menu.addItem(&view_spectrogram);
+        for item in &views {
+            view_menu.addItem(item);
+        }
         view_menu.addItem(&NSMenuItem::separatorItem(mtm));
         view_menu.addItem(&fullscreen);
         view_menu.addItem(&pin);
@@ -226,8 +243,8 @@ impl NativeMenu {
         app_menu.addItem(&NSMenuItem::separatorItem(mtm));
         app_menu.addItem(&command_item(
             mtm,
-            "设置…",
-            TAG_SETTINGS,
+            "特效…",
+            TAG_EFFECTS,
             Some(","),
             &handler,
         ));
@@ -274,8 +291,7 @@ impl NativeMenu {
             handler,
             shared,
             items: MenuItems {
-                view_spectrum,
-                view_spectrogram,
+                views,
                 fullscreen,
                 pin,
                 freeze,
@@ -295,20 +311,12 @@ impl NativeMenu {
     }
 
     /// 刷新勾选态(每帧调用,开销可忽略)。
-    #[allow(clippy::too_many_arguments)]
     pub fn sync(&self, view: ViewMode, fullscreen: bool, pin: bool, frozen: bool, hud: bool) {
         let on = NSControlStateValueOn;
         let off = NSControlStateValueOff;
-        self.items
-            .view_spectrum
-            .setState(if view == ViewMode::Spectrum { on } else { off });
-        self.items
-            .view_spectrogram
-            .setState(if view == ViewMode::Spectrogram {
-                on
-            } else {
-                off
-            });
+        for (i, item) in self.items.views.iter().enumerate() {
+            item.setState(if ViewMode::ALL[i] == view { on } else { off });
+        }
         self.items
             .fullscreen
             .setState(if fullscreen { on } else { off });

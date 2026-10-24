@@ -46,6 +46,52 @@ _Avoid_: restart, refresh
 The user-selected pairing of a capture kind (Input Capture or Loopback Capture) with a specific device; exactly one Source is active at a time.
 _Avoid_: device, input, stream, channel
 
+### Views and Effects
+
+**View**:
+One of the eight display modes: Spectrum, Spectrogram, the four Effects, Static, Screensaver. Exactly one is active; the View menu, the S key, and the Effects Window tabs all address the same list.
+_Avoid_: 页面, screen, tab
+
+**Effect**:
+A music-reactive view beyond the Spectrum; one of Waveform, Particles, Glow, or Disc. The Spectrum itself is not an Effect.
+_Avoid_: 动效, visualizer, 视图特效
+
+**Waveform**:
+An Effect tracing the momentary sample amplitude across time, left to right. Time-domain, unlike the Spectrum.
+_Avoid_: 示波器, 频谱, PCM 图
+
+**Particles**:
+An Effect of music-driven particles emitted and pulsing with the Bass Level.
+_Avoid_: 粒子系统, 星尘
+
+**Glow**:
+An Effect of pulsing layered light rendered from Band energy.
+_Avoid_: 光晕, 辉光, 律动光效
+
+**Disc**:
+The NetEase-style CD Effect: a spinning disc with tonearm and center Cover, pulsing with the Bass Level.
+_Avoid_: 黑胶, vinyl, CD 播放器, 唱片机
+
+**Cover**:
+The image shown at a Disc's center: a user-selected image or the built-in default disc art — not necessarily real album art.
+_Avoid_: 专辑封面, album art, 头图
+
+**Bass Level**:
+The shared per-frame loudness of the lowest Bands; every Effect pulses to it in sync.
+_Avoid_: 节拍, beat, 音量, 低频均值
+
+**Static**:
+A View showing only the background image (theme base color when none is set) with nothing on top; not audio-reactive.
+_Avoid_: 壁纸, 相框, 图片模式
+
+**Screensaver**:
+A View of ambient animations — morphing lines, ribbons, aurora, pipes, bubbles, starfield — that ignores the audio source.
+_Avoid_: 待机, 省电模式, 动画壁纸
+
+**Effects Window**:
+The tabbed window opened from the View menu: one tab per View plus a 通用 tab for global options; each tab holds that View's options. The former settings window is dissolved into it.
+_Avoid_: 设置窗, 特效选择器, 配置窗
+
 ### Updater
 
 **Update Check**:

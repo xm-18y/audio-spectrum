@@ -318,12 +318,13 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "audio-spectrum-app"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "audio-spectrum-capture",
  "audio-spectrum-core",
  "dirs",
  "iced",
+ "iced_aw",
  "image",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
@@ -338,7 +339,7 @@ dependencies = [
 
 [[package]]
 name = "audio-spectrum-capture"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "block2 0.6.2",
  "cpal",
@@ -355,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "audio-spectrum-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "realfft",
 ]
@@ -614,6 +615,19 @@ name = "cfg_aliases"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
+
+[[package]]
+name = "chrono"
+version = "0.4.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
+dependencies = [
+ "iana-time-zone",
+ "js-sys",
+ "num-traits",
+ "wasm-bindgen",
+ "windows-link",
+]
 
 [[package]]
 name = "clipboard-win"
@@ -1574,6 +1588,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
+name = "iana-time-zone"
+version = "0.1.65"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470"
+dependencies = [
+ "android_system_properties",
+ "core-foundation-sys",
+ "iana-time-zone-haiku",
+ "js-sys",
+ "log",
+ "wasm-bindgen",
+ "windows-core 0.62.2",
+]
+
+[[package]]
+name = "iana-time-zone-haiku"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "iced"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1588,6 +1626,22 @@ dependencies = [
  "iced_winit",
  "image",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "iced_aw"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59b7f923642b024c415150b70ef84ee5c11626e3b0af73b954d817d573bcd0a4"
+dependencies = [
+ "cfg-if",
+ "chrono",
+ "iced_core",
+ "iced_fonts",
+ "iced_widget",
+ "num-format",
+ "num-traits",
+ "web-time",
 ]
 
 [[package]]
@@ -1617,6 +1671,29 @@ dependencies = [
  "iced_core",
  "iced_futures",
  "log",
+]
+
+[[package]]
+name = "iced_fonts"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "214cff7c8499e328774216690e58e315a1a5f8f6fdd1035aed6298e62ffc4c1d"
+dependencies = [
+ "iced_core",
+ "iced_fonts_macros",
+ "iced_widget",
+]
+
+[[package]]
+name = "iced_fonts_macros"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ef5125e110cb19cd1910a28298661c98c5d9ab02eef43594968352940e8752e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "ttf-parser",
 ]
 
 [[package]]
@@ -2495,6 +2572,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "num-format"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a652d9771a63711fd3c3deb670acfbe5c30a4072e664d7a3bf5a9e1056ac72c3"
+dependencies = [
+ "arrayvec",
+ "itoa",
 ]
 
 [[package]]
