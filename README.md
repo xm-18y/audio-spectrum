@@ -1,7 +1,30 @@
 # audio-spectrum
 
-跨平台(Windows / macOS / Linux)实时音频频谱显示应用。领域术语见
-[GLOSSARY.md](GLOSSARY.md),架构决策见 [docs/adr/](docs/adr/)。
+把系统正在播放的声音变成频谱的跨平台(Windows / macOS / Linux)桌面小应用:
+回环(Loopback)或麦克风采集 → 2048 点实 FFT → 对数轴(20Hz–20kHz)频段聚合
+→ 60fps 渐变柱频谱与 12s 滚动语谱。陪伴式设计:全出血无边框、置顶、全屏、
+主题配色与背景图均可调。
+
+![频谱视图](docs/screenshots/spectrum.png)
+
+![语谱视图](docs/screenshots/spectrogram.png)
+
+> 界面示意图:按真实布局/配色常量由 `scripts/gen-screenshots.py` 生成,
+> 音频内容为模拟数据。
+
+**主要特性**
+
+- **实时频谱**:对数轴 20Hz–20kHz,频段数 1–255 滑杆连续可调,快攻慢放
+  平滑 + Peak Hold 峰值帽,衰减速度五档
+- **语谱图**:12s 滚动历史、20ms 列聚合,`S` 键与频谱视图即切
+- **声源**:系统回环(Windows WASAPI / macOS ScreenCaptureKit /
+  Linux PulseAudio)或麦克风/线路输入,断线自动重连
+- **个性化**:5 主题预设 + 逐槽颜色覆盖、背景图(填满/适应/平铺、
+  不透明度、模糊)、窗口置顶/记忆/启动全屏
+- **关于与更新**:应用内检查新版本、下载(实时进度条)、完成后自动
+  换装重启,无需手动重装
+
+领域术语见 [GLOSSARY.md](GLOSSARY.md),架构决策见 [docs/adr/](docs/adr/)。
 
 ## 运行
 
@@ -9,7 +32,8 @@
 cargo run -p audio-spectrum-app   # macOS 首次运行会请求麦克风权限
 # 快捷键:S = 频谱⇄语谱,Space = 冻结/解冻,⌘, = 设置,
 # F11 = 全屏(仅 Windows/Linux;macOS 用 ⌘F),双击 = 全屏⇄窗口,ESC 关窗/退全屏
-# 配置入口:原生菜单栏(macOS)/ 应用菜单栏(Windows/Linux);设置存于
+# 配置入口:原生菜单栏(macOS)/ 应用菜单栏(Windows/Linux,末尾「关于」
+#   按钮独立窗口打开);macOS「关于 audio-spectrum…」在原生应用菜单;设置存于
 #   macOS ~/Library/Application Support/audio-spectrum/settings.ron
 #   Windows %APPDATA%\audio-spectrum\settings.ron · Linux ~/.config/audio-spectrum/
 scripts/bundle-macos.sh       # 打包 .app(Dock/启动台图标 + Info.plist + 麦克风用途声明)
@@ -48,9 +72,20 @@ crates/
 
 ## 状态
 
+- ✅ v0.7.0 关于/检测更新双窗口 + 应用内更新:菜单栏末尾「关于」下拉含
+  「关于」「检测更新」两个子项(macOS 为原生菜单「关于 audio-spectrum /
+  检查更新…」),各自打开独立窗口——关于窗:程序图标、名称-版本号
+  纵向水平居中,下方开源地址与程序说明;检测更新窗:启动时自动检测,
+  有新版时菜单「关于」右上角显示红点,窗内显示「当前版本 → 最新
+  版本」+「更新」按钮 → 下载(实时进度条)→「立即安装」按钮 → 自动
+  换装重启;更新源为 GitHub Releases(资产命名对齐 CI 三平台产物),
+  版本号按 semver 比较(同版本重建不提示);换装采用「旧版改名 .old
+  让位 → 新版就位 → 拉起新进程」(macOS .app 整包替换),启动时自动
+  清理残留,失败回滚并可重试
+
 - ✅ v0.6.0 应用菜单栏 + Windows Loopback 修复:非 macOS 取消右键菜单,
   改为窗口顶部常驻应用菜单栏;视图菜单聚合视图/全屏/窗口(启动全屏、
-  置顶、记忆)/频段数(32–192 六档)/衰减速度(极慢—极快五档),
+  置顶、记忆)/频段数(1–255 滑杆连续可调)/衰减速度(极慢—极快五档),
   设置窗只剩 Peak Hold、网格、样式、背景图;左下状态浮层移除;绘图区
   全出血铺满窗体(频率刻度内嵌底缘);双击主体内容切换全屏;修复背景图
   遮挡频谱/语谱(iced canvas 同帧内图像
@@ -94,6 +129,8 @@ GitHub Actions(`.github/workflows/build.yml`)三平台构建:
 - **下载链接**:main 分支/手动触发 → 滚动 prerelease `latest`(链接永久稳定);
   推送 `v*` tag → 该 tag 的正式 Release;
   其他分支 → run 级 Artifacts
+- **应用内更新**:已安装的客户端在「关于」菜单可一键检查/下载/换装
+  (资产命名与平台匹配规则见 `crates/app/src/updater.rs`)
 - 首次接入:
   ```bash
   git remote add origin git@github.com:<你>/audio-spectrum.git
@@ -102,6 +139,17 @@ GitHub Actions(`.github/workflows/build.yml`)三平台构建:
 
 ## 已知取舍
 
+- 应用内更新:
+  - 依赖 GitHub Releases 资产命名约定(`audio-spectrum-<标签>-<平台>.zip/tar.gz`,
+    与 CI 产物一致);平台仅覆盖 CI 矩阵(Windows x64 / macOS arm64 / Linux x64),
+    其余平台报「暂不支持」。
+  - 版本比较只取 semver(资产名里的 `x.y.z`),CI 时间戳标签仅作展示:
+    同版本重建不会提示更新。
+  - 换装需要写权限:新版下载/解压在可执行文件同目录 `.update-tmp`,
+    目录不可写(如受控的 `/Applications`)时会失败并提示;
+    macOS 以 `open` 拉起新包,裸二进制( cargo run )直接 spawn。
+  - 检查走未鉴权 GitHub API(60 次/时/IP):启动自动检测一次 + 手动
+    检查,足够使用;检测线程异常退出时状态机回 Idle,可重新发起。
 - 设备身份:macOS 用 SCK 伪设备“系统音频输出”;Windows 用 WASAPI 端点 ID;
   Linux 用 PulseAudio monitor source 名;设备列表每秒轮询刷新。
 - macOS 26 的 SCStreamConfiguration 已无 `capturesCurrentAudioOutput`(13–15 的

@@ -26,6 +26,8 @@ use crate::ViewMode;
 #[derive(Debug)]
 pub enum MenuCommand {
     OpenSettings,
+    OpenAbout,
+    OpenUpdate,
     SetView(ViewMode),
     ToggleFullscreen,
     ToggleAlwaysOnTop,
@@ -51,6 +53,8 @@ const TAG_FULLSCREEN: isize = 4;
 const TAG_PIN: isize = 5;
 const TAG_FREEZE: isize = 6;
 const TAG_HUD: isize = 7;
+const TAG_ABOUT: isize = 8;
+const TAG_CHECK_UPDATE: isize = 9;
 const TAG_SOURCE: isize = 1000;
 
 define_class!(
@@ -70,6 +74,8 @@ define_class!(
             let Ok(mut guard) = self.ivars().lock() else { return };
             let command = match tag {
                 TAG_SETTINGS => Some(MenuCommand::OpenSettings),
+                TAG_ABOUT => Some(MenuCommand::OpenAbout),
+                TAG_CHECK_UPDATE => Some(MenuCommand::OpenUpdate),
                 TAG_VIEW_SPECTRUM => Some(MenuCommand::SetView(ViewMode::Spectrum)),
                 TAG_VIEW_SPECTROGRAM => Some(MenuCommand::SetView(ViewMode::Spectrogram)),
                 TAG_FULLSCREEN => Some(MenuCommand::ToggleFullscreen),
@@ -203,11 +209,19 @@ impl NativeMenu {
 
         // 应用菜单(第一项,含标准动作)
         let app_menu = NSMenu::new(mtm);
-        app_menu.addItem(&standard_item(
+        app_menu.addItem(&command_item(
             mtm,
             "关于 audio-spectrum",
-            sel!(orderFrontStandardAboutPanel:),
+            TAG_ABOUT,
             None,
+            &handler,
+        ));
+        app_menu.addItem(&command_item(
+            mtm,
+            "检查更新…",
+            TAG_CHECK_UPDATE,
+            None,
+            &handler,
         ));
         app_menu.addItem(&NSMenuItem::separatorItem(mtm));
         app_menu.addItem(&command_item(
@@ -237,9 +251,9 @@ impl NativeMenu {
             sel!(terminate:),
             Some("q"),
         ));
-        // 「隐藏其他」需要 Option 修饰。
+        // 「隐藏其他」需要 Option 修饰(随「检查更新」子项插入后移)。
         // SAFETY: AppKit API。
-        let hide_others = app_menu.itemArray().objectAtIndex(4);
+        let hide_others = app_menu.itemArray().objectAtIndex(5);
         hide_others.setKeyEquivalentModifierMask(
             NSEventModifierFlags::Command.union(NSEventModifierFlags::Option),
         );

@@ -18,6 +18,15 @@ winresource = "0.1"
 version = "1"
 features = ["derive"]
 
+# 应用内更新:GitHub Releases API 与资产下载(rustls,无 openssl 依赖)。
+[dependencies.ureq]
+version = "2"
+default-features = false
+features = ["tls"]
+
+[dependencies.serde_json]
+version = "1"
+
 [dependencies.ron]
 version = "0.12"
 

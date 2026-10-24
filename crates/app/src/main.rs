@@ -20,8 +20,8 @@
 
 use audio_spectrum_app::{
     BackgroundSettings, DecayChoice, Palette, ScaleMode, Settings, ThemePreset, ViewMode,
-    band_color as palette_band_color, blur_rgba, load as load_settings, resolve_palette,
-    save as save_settings, spectro_pixels,
+    BAND_COUNT_MAX, BAND_COUNT_MIN, band_color as palette_band_color, blur_rgba,
+    load as load_settings, resolve_palette, save as save_settings, spectro_pixels,
 };
 #[cfg(target_os = "macos")]
 use audio_spectrum_app::{MenuCommand, NativeMenu};
@@ -30,6 +30,9 @@ use audio_spectrum_core::{
     Analyzer, DB_CEILING, DB_FLOOR, DecaySpeed, FRAME_SIZE, FREQ_MIN_HZ, SPECTRO_COLUMN_COUNT,
     Smoother, Spectrograph,
 };
+
+mod updater;
+use updater::{UpdateEvent, UpdatePhase};
 use iced::alignment::{Horizontal, Vertical};
 use iced::keyboard::{self, key::Named};
 use iced::widget::image::Handle as ImageHandle;
@@ -146,6 +149,19 @@ enum Message {
     SetBlur(f32),
     ToggleFullscreenDefault,
     ToggleRememberWindow,
+    // —— 关于 / 更新 ——
+    /// 打开「关于」窗口(菜单栏末尾「关于」下拉子项 / macOS 原生菜单)。
+    OpenAbout,
+    /// 关闭「关于」窗口(点遮罩)。
+    CloseAbout,
+    /// 打开「检测更新」窗口(同上)。
+    OpenUpdate,
+    /// 关闭「检测更新」窗口(点遮罩)。
+    CloseUpdate,
+    CheckUpdates,
+    DownloadUpdate,
+    /// 安装已下载的新版(立即安装)。
+    InstallUpdate,
 }
 
 /// 应用菜单栏的顶层菜单(非 macOS)。
@@ -154,6 +170,7 @@ enum Message {
 enum MenuTab {
     View,
     Source,
+    About,
 }
 
 /// 颜色覆盖槽(设置窗的十六进制输入对应 StyleSettings 的四个 Option)。
@@ -222,6 +239,15 @@ struct SpectrumApp {
     /// 展开中的应用菜单栏下拉(非 macOS;None = 全部收起)。
     #[cfg(not(target_os = "macos"))]
     open_menu: Option<MenuTab>,
+    /// 「关于」窗口开关(菜单栏「关于」下拉子项 / macOS 原生菜单打开)。
+    about_open: bool,
+    /// 「检测更新」窗口开关(同上)。
+    update_open: bool,
+    /// 「关于」窗口展示的程序图标(启动时解码一次;解码失败则不展示)。
+    about_icon: Option<ImageHandle>,
+    /// 应用内更新:状态机 + 后台线程事件流(每帧轮询;启动即自动检测)。
+    update_phase: UpdatePhase,
+    update_rx: Option<std::sync::mpsc::Receiver<UpdateEvent>>,
     /// 颜色覆盖槽的十六进制输入草稿(与 StyleSettings 的 Option 解析联动)。
     color_drafts: [String; 4],
 }
@@ -262,6 +288,12 @@ impl SpectrumApp {
             native_menu: None,
             #[cfg(not(target_os = "macos"))]
             open_menu: None,
+            about_open: false,
+            update_open: false,
+            about_icon: decode_icon(),
+            // 启动即自动检测更新(后台线程,结果经菜单红点/更新窗呈现)。
+            update_phase: UpdatePhase::Checking,
+            update_rx: Some(updater::spawn_check()),
             frozen: false,
             last_canvas_click: None,
             fullscreen: false,
@@ -290,6 +322,79 @@ impl SpectrumApp {
     /// 标记设置已变更(300ms 防抖后落盘)。
     fn mark_dirty(&mut self) {
         self.settings_dirty = Some(Instant::now());
+    }
+
+    /// 更新是否有未安装的新版(菜单「关于」右上角红点)。
+    fn update_pending(&self) -> bool {
+        matches!(
+            self.update_phase,
+            UpdatePhase::Available(_) | UpdatePhase::Downloading { .. } | UpdatePhase::Ready(_)
+        )
+    }
+
+    /// 轮询更新线程事件,推进状态机(每帧一次;无事件零开销)。
+    /// 轮询更新线程事件,推进状态机(每帧一次;无事件零开销)。
+    fn poll_update(&mut self) {
+        let Some(rx) = self.update_rx.as_ref() else { return };
+        // 先收集后应用:避免通道借用与状态可变借用冲突。
+        let mut events = Vec::new();
+        let mut disconnected = false;
+        loop {
+            match rx.try_recv() {
+                Ok(ev) => events.push(ev),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+            }
+        }
+        for ev in events {
+            self.apply_update_event(ev);
+        }
+        if disconnected
+            && matches!(
+                self.update_phase,
+                UpdatePhase::Checking | UpdatePhase::Downloading { .. }
+            )
+        {
+            // 线程异常退出且未发终态事件:回 Idle 允许重新检查。
+            self.update_phase = UpdatePhase::Idle;
+            self.update_rx = None;
+        }
+    }
+
+    fn apply_update_event(&mut self, ev: UpdateEvent) {
+        match ev {
+            UpdateEvent::Checked(Ok(outcome)) => match outcome {
+                updater::CheckOutcome::UpToDate(label) => {
+                    self.update_phase = UpdatePhase::UpToDate(label)
+                }
+                updater::CheckOutcome::Available(info) => {
+                    self.update_phase = UpdatePhase::Available(info)
+                }
+            },
+            UpdateEvent::Checked(Err(e)) => self.update_phase = UpdatePhase::Failed(e),
+            UpdateEvent::Progress { received, total } => {
+                self.update_phase = UpdatePhase::Downloading { received, total }
+            }
+            // 下载完成:进入待安装态,由用户在更新窗点「立即安装」。
+            UpdateEvent::Downloaded(path) => {
+                self.update_phase = UpdatePhase::Ready(path);
+            }
+            UpdateEvent::Failed(e) => self.update_phase = UpdatePhase::Failed(e),
+        }
+    }
+
+    /// 发起一次更新检查(仅在无后台任务进行中时)。
+    fn start_check(&mut self) {
+        if !matches!(
+            self.update_phase,
+            UpdatePhase::Checking | UpdatePhase::Downloading { .. }
+        ) {
+            self.update_phase = UpdatePhase::Checking;
+            self.update_rx = Some(updater::spawn_check());
+        }
     }
 
     /// 重建分析管线(频段数变化后);显示状态清零重来。
@@ -616,6 +721,14 @@ impl SpectrumApp {
                 self.settings_open = true;
                 Task::none()
             }
+            MenuCommand::OpenAbout => {
+                self.about_open = true;
+                Task::none()
+            }
+            MenuCommand::OpenUpdate => {
+                self.update_open = true;
+                Task::none()
+            }
             MenuCommand::SetView(v) => {
                 self.settings.view = v;
                 self.mark_dirty();
@@ -657,6 +770,8 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
             | Message::SetDecay(_)
             | Message::SelectSource(_)
             | Message::OpenSettings
+            | Message::OpenAbout
+            | Message::OpenUpdate
     ) {
         app.open_menu = None;
     }
@@ -715,6 +830,7 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
                 tasks.push(window::mode(id).map(Message::WindowMode));
             }
 
+            app.poll_update();
             app.tick(now);
             app.pump_audio();
             // 冻结时分析继续(环缓冲不积压),但显示与语谱滚动停住。
@@ -812,7 +928,45 @@ fn update(app: &mut SpectrumApp, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SelectSource(info) => app.do_select_source(info),
+        Message::CheckUpdates => {
+            app.start_check();
+            Task::none()
+        }
+        Message::DownloadUpdate => {
+            if let UpdatePhase::Available(info) = app.update_phase.clone() {
+                let total = info.asset_size;
+                app.update_phase = UpdatePhase::Downloading { received: 0, total };
+                app.update_rx = Some(updater::spawn_download(info));
+            }
+            Task::none()
+        }
+        Message::InstallUpdate => {
+            if let UpdatePhase::Ready(path) = app.update_phase.clone() {
+                match updater::install(&path) {
+                    Ok(()) => {} // install 内部已拉起新进程并退出
+                    Err(e) => app.update_phase = UpdatePhase::Failed(e),
+                }
+            }
+            Task::none()
+        }
+        Message::OpenAbout => {
+            app.about_open = true;
+            Task::none()
+        }
+        Message::CloseAbout => {
+            app.about_open = false;
+            Task::none()
+        }
+        Message::OpenUpdate => {
+            app.update_open = true;
+            Task::none()
+        }
+        Message::CloseUpdate => {
+            app.update_open = false;
+            Task::none()
+        }
         Message::SetBandCount(n) => {
+            let n = n.clamp(BAND_COUNT_MIN, BAND_COUNT_MAX);
             if app.settings.band_count != n {
                 app.settings.band_count = n;
                 app.rebuild_analysis();
@@ -1017,6 +1171,18 @@ fn view(app: &SpectrumApp) -> Element<'_, Message> {
     if app.settings_open {
         layers.push(dim_overlay(Message::CloseSettings));
         layers.push(settings_panel(app));
+    }
+
+    // 「关于」窗口(菜单栏「关于」下拉子项 / macOS 原生菜单打开;点遮罩关闭)。
+    if app.about_open {
+        layers.push(dim_overlay(Message::CloseAbout));
+        layers.push(about_overlay(app));
+    }
+
+    // 「检测更新」窗口(同上;启动已自动检测,红点在菜单栏「关于」上)。
+    if app.update_open {
+        layers.push(dim_overlay(Message::CloseUpdate));
+        layers.push(update_overlay(app));
     }
 
     stack(layers)
@@ -1497,14 +1663,38 @@ const MENU_BAR_BG: Color = Color::from_rgb(0.07, 0.08, 0.11);
 /// 全屏时整体隐藏(见 view),保持纯净画面。
 #[cfg(not(target_os = "macos"))]
 fn menu_bar(app: &SpectrumApp) -> Element<'_, Message> {
-    let tabs = [(MenuTab::View, "视图"), (MenuTab::Source, "声源")];
     let mut bar = row![].spacing(2);
-    for (tab, label) in tabs {
+    for (tab, label) in [(MenuTab::View, "视图"), (MenuTab::Source, "声源")] {
         let open = app.open_menu == Some(tab);
         bar = bar.push(menu_tab(label, open, Message::ToggleMenu(tab)));
     }
     // 设置:直达按钮(高亮 = 设置窗已打开)。
     bar = bar.push(menu_tab("设置", app.settings_open, Message::OpenSettings));
+    // 关于:末尾下拉(子项:关于 / 检测更新);有待装新版时右上角红点。
+    let about_open = app.open_menu == Some(MenuTab::About);
+    let about_tab = menu_tab("关于", about_open, Message::ToggleMenu(MenuTab::About));
+    let about_element: Element<'static, Message> = if app.update_pending() {
+        // 红点:内层 7px 圆点自身涂红;外层透明容器定位到右上角。
+        let dot = container(Space::new().width(Length::Fixed(7.0)).height(Length::Fixed(7.0)))
+            .style(|_theme: &Theme| container::Style {
+                background: Some(Color::from_rgb(0.95, 0.30, 0.28).into()),
+                border: iced::border::rounded(3.5),
+                ..Default::default()
+            });
+        stack![
+            about_tab,
+            container(dot)
+                .width(Length::Fixed(MENU_TAB_WIDTH))
+                .height(Length::Fixed(MENU_BAR_HEIGHT - 6.0))
+                .align_x(Horizontal::Right)
+                .align_y(Vertical::Top)
+                .padding(Padding { top: 1.0, right: 9.0, ..Padding::ZERO }),
+        ]
+        .into()
+    } else {
+        about_tab.into()
+    };
+    bar = bar.push(about_element);
 
     container(bar)
         .width(Length::Fill)
@@ -1583,6 +1773,16 @@ fn dropdown(app: &SpectrumApp, tab: MenuTab) -> Element<'_, Message> {
             section_label("衰减速度").into(),
             decay_row(s),
         ],
+        MenuTab::About => {
+            let mut items: Vec<Element<'_, Message>> = vec![
+                choice("关于", app.about_open, Message::OpenAbout).into(),
+                choice("检测更新", app.update_open, Message::OpenUpdate).into(),
+            ];
+            if app.update_pending() {
+                items.push(hint_text("有可用新版本"));
+            }
+            items
+        }
         MenuTab::Source => {
             let mut items: Vec<Element<'_, Message>> = Vec::new();
             let note = app.system.loopback_note();
@@ -1611,10 +1811,11 @@ fn dropdown(app: &SpectrumApp, tab: MenuTab) -> Element<'_, Message> {
         .padding(10.0)
         .style(|_theme: &Theme| panel_style());
 
-    // 锚点:菜单栏正下方,左缘对齐对应菜单项。
+    // 锚点:菜单栏正下方,左缘对齐对应菜单项(视图/声源/设置/关于顺次排布)。
     let left = match tab {
         MenuTab::View => 6.0,
         MenuTab::Source => 6.0 + MENU_TAB_WIDTH,
+        MenuTab::About => 6.0 + 3.0 * MENU_TAB_WIDTH,
     };
     container(panel)
         .width(Length::Fill)
@@ -1629,18 +1830,25 @@ fn dropdown(app: &SpectrumApp, tab: MenuTab) -> Element<'_, Message> {
         .into()
 }
 
-/// 频段数可选档位。
-#[cfg(not(target_os = "macos"))]
-const BAND_CHOICES: &[usize] = &[32, 48, 64, 96, 128, 192];
-
-/// 「频段数」档位行(视图菜单内;紧凑多档并排)。
+/// 「频段数」滑杆行(视图菜单内;1—255 连续可调,步进 1,右侧实时读数)。
 #[cfg(not(target_os = "macos"))]
 fn band_count_row(s: &Settings) -> Element<'static, Message> {
-    row(BAND_CHOICES
-        .iter()
-        .map(|&n| mini_choice(&n.to_string(), s.band_count == n, Message::SetBandCount(n)).into())
-        .collect::<Vec<_>>())
-    .spacing(3)
+    row![
+        slider(
+            BAND_COUNT_MIN as f32..=BAND_COUNT_MAX as f32,
+            s.band_count as f32,
+            |v| Message::SetBandCount(v.round() as usize),
+        )
+        .step(1.0_f32)
+        .width(Length::Fill),
+        text(s.band_count.to_string())
+            .size(11.0)
+            .color(SECTION_FG)
+            .font(Font::MONOSPACE)
+            .width(Length::Fixed(26.0)),
+    ]
+    .spacing(6)
+    .align_y(Vertical::Center)
     .into()
 }
 
@@ -1742,6 +1950,190 @@ fn flat_button() -> button::Style {
         text_color: BTN_FG,
         border: iced::border::rounded(4),
         ..Default::default()
+    }
+}
+
+/// 「关于与更新」窗口内容(菜单栏末尾「关于」/ macOS 原生菜单打开
+/// [`about_overlay`]):程序说明 + 更新检测/下载进度。
+/// 解码内嵌程序图标为图片句柄(「关于」窗口展示;失败返回 None)。
+fn decode_icon() -> Option<ImageHandle> {
+    let icon = image::load_from_memory(APP_ICON_PNG).ok()?;
+    let rgba = icon.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    Some(ImageHandle::from_rgba(w, h, rgba.into_raw()))
+}
+
+/// 「关于」窗口(菜单栏「关于」下拉子项 / macOS 原生菜单打开):图标 +
+/// 名称-版本号纵向水平居中,下方开源地址与程序说明。
+fn about_overlay(app: &SpectrumApp) -> Element<'_, Message> {
+    let icon: Element<'static, Message> = match &app.about_icon {
+        Some(handle) => iced::widget::image(handle.clone())
+            .width(Length::Fixed(64.0))
+            .height(Length::Fixed(64.0))
+            .into(),
+        None => Space::new().height(Length::Fixed(8.0)).into(),
+    };
+    let col = column![
+        icon,
+        row![
+            text("audio-spectrum").size(16.0).color(Color::WHITE),
+            text(format!("v{}", updater::CURRENT_VERSION))
+                .size(12.0)
+                .color(SECTION_FG)
+                .font(Font::MONOSPACE),
+        ]
+        .spacing(8)
+        .align_y(Vertical::Center),
+        iced::widget::rule::horizontal(1.0),
+        text(format!("开源主页:github.com/{}", updater::UPDATE_REPO))
+            .size(11.0)
+            .color(SECTION_FG)
+            .font(Font::MONOSPACE),
+        text(
+            "跨平台实时音频频谱显示:系统回环(Loopback)或麦克风采集,"
+                .to_string()
+                + "频谱柱 / 语谱图双视图,支持 Peak Hold、主题配色与背景图自定义。",
+        )
+        .size(12.0)
+        .color(BTN_FG),
+    ]
+    .spacing(10)
+    .align_x(Horizontal::Center)
+    .width(Length::Fixed(320.0));
+    window_card(col)
+}
+
+/// 「检测更新」窗口:当前版本 → 最新版本、更新按钮、下载进度、
+/// 下载完成后的「立即安装」;启动已自动检测,亦可手动重新检查。
+fn update_overlay(app: &SpectrumApp) -> Element<'_, Message> {
+    let check_button = |label: &str| {
+        button(text(label.to_string()).size(12.0).color(BTN_FG).font(CJK_FONT))
+            .on_press(Message::CheckUpdates)
+            .padding([3.0, 10.0])
+            .style(|_theme, _status| flat_button())
+    };
+    let primary_button = |label: &str, on_press: Message| {
+        button(text(label.to_string()).size(13.0).color(Color::WHITE).font(CJK_FONT))
+            .on_press(on_press)
+            .padding([4.0, 18.0])
+            .style(|_theme, _status| button::Style {
+                background: Some(SELECTED_BG.into()),
+                text_color: Color::WHITE,
+                border: iced::border::rounded(4),
+                ..Default::default()
+            })
+    };
+    let mut col = column![section_label("软件更新")].spacing(10).width(Length::Fixed(300.0));
+    match &app.update_phase {
+        UpdatePhase::Idle => {
+            col = col.push(hint_text("尚未检查更新"));
+            col = col.push(check_button("检查更新"));
+        }
+        UpdatePhase::Checking => {
+            col = col.push(hint_text("正在检查更新…"));
+        }
+        UpdatePhase::UpToDate(label) => {
+            col = col.push(
+                text("✓ 已是最新")
+                    .size(13.0)
+                    .color(BTN_FG)
+                    .font(CJK_FONT),
+            );
+            col = col.push(hint_text(format!("线上版本 {label}")));
+            col = col.push(check_button("重新检查"));
+        }
+        UpdatePhase::Available(info) => {
+            // 当前版本号 → 最新版本号,水平居中。
+            col = col.push(
+                row![
+                    text(format!("v{}", updater::CURRENT_VERSION))
+                        .size(14.0)
+                        .color(BTN_FG)
+                        .font(Font::MONOSPACE),
+                    text("→").size(14.0).color(SECTION_FG),
+                    text(info.label.clone())
+                        .size(14.0)
+                        .color(Color::WHITE)
+                        .font(Font::MONOSPACE),
+                ]
+                .spacing(10)
+                .align_y(Vertical::Center),
+            );
+            col = col.push(hint_text(format!(
+                "发现新版本,包大小约 {}",
+                fmt_bytes(info.asset_size)
+            )));
+            col = col.push(primary_button("更新", Message::DownloadUpdate));
+        }
+        UpdatePhase::Downloading { received, total } => {
+            let (received, total) = (*received, *total);
+            let pct = if total > 0 {
+                format!("({:.0}%)", received as f32 / total as f32 * 100.0)
+            } else {
+                String::new()
+            };
+            col = col.push(
+                iced::widget::progress_bar(
+                    0.0..=total.max(1) as f32,
+                    received.min(total.max(1)) as f32,
+                )
+                .girth(Length::Fixed(6.0)),
+            );
+            col = col.push(hint_text(format!(
+                "{:.1} / {:.1} MB {}",
+                received as f32 / 1_048_576.0,
+                total as f32 / 1_048_576.0,
+                pct
+            )));
+        }
+        UpdatePhase::Ready(_) => {
+            col = col.push(
+                text("✓ 新版本已下载")
+                    .size(13.0)
+                    .color(BTN_FG)
+                    .font(CJK_FONT),
+            );
+            col = col.push(hint_text("安装时将自动重启应用"));
+            col = col.push(primary_button("立即安装", Message::InstallUpdate));
+        }
+        UpdatePhase::Failed(e) => {
+            col = col.push(
+                text(format!("更新失败:{e}"))
+                    .size(12.0)
+                    .color(Color::from_rgb(0.95, 0.55, 0.45)),
+            );
+            col = col.push(check_button("重试"));
+        }
+    }
+    window_card(col)
+}
+
+/// 居中弹窗卡片(「关于」/「检测更新」共用;样式与设置窗一致)。
+fn window_card(content: impl Into<Element<'static, Message>>) -> Element<'static, Message> {
+    container(
+        container(content)
+            .padding(16.0)
+            .style(|_theme: &Theme| panel_style()),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(Horizontal::Center)
+    .align_y(Vertical::Center)
+    .into()
+}
+
+fn hint_text(s: impl Into<String>) -> Element<'static, Message> {
+    text(s.into()).size(11.0).color(SECTION_FG).into()
+}
+
+/// 字节数人读格式(B / KB / MB,一位小数)。
+fn fmt_bytes(bytes: u64) -> String {
+    if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f32 / 1_048_576.0)
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f32 / 1024.0)
+    } else {
+        format!("{bytes} B")
     }
 }
 
@@ -2017,6 +2409,8 @@ fn cjk_font_bytes() -> Option<Vec<u8>> {
 
 fn main() -> iced::Result {
     let settings = load_settings();
+    // 清理上次自更新换装的残留(旧版 .old 与临时目录)。
+    updater::cleanup_stale();
 
     let (size, position) = match settings.window_rect {
         Some([x, y, w, h]) => (

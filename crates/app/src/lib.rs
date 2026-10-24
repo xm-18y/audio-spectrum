@@ -18,6 +18,11 @@ pub use macos_menu::{MenuCommand, NativeMenu};
 // 视图 / 衰减
 // ---------------------------------------------------------------------------
 
+/// 频段数可调下限(0 会让 `Analyzer::new` 断言)。
+pub const BAND_COUNT_MIN: usize = 1;
+/// 频段数可调上限(对数轴上再细分已无意义)。
+pub const BAND_COUNT_MAX: usize = 255;
+
 /// 哪个画布处于激活态;`S` 键切换。
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum ViewMode {
@@ -483,7 +488,14 @@ pub fn load_from(path: &Path) -> Settings {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|text| ron::from_str(&text).ok())
+        .map(normalize)
         .unwrap_or_default()
+}
+
+/// 载入后的合法性收敛:频段数钳制到可调范围(旧配置或手改越界时)。
+fn normalize(mut s: Settings) -> Settings {
+    s.band_count = s.band_count.clamp(BAND_COUNT_MIN, BAND_COUNT_MAX);
+    s
 }
 
 /// 保存到指定路径(创建父目录)。
