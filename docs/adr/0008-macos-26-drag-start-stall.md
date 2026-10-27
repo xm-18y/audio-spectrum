@@ -6,6 +6,9 @@ With the frame loop paused (Space in `repro/drag-stutter`), dragging is
 smooth. Switching between a flat fill and a 1500-segment canvas makes no
 difference — the stall is independent of per-frame cost.
 
+主要原因是Magnet 和 BetterTouchTool 导致的问题，[On MacOS dragging window lags if rendering continuously with Magnet utility enabled and VSync enabled](https://github.com/rust-windowing/winit/issues/1737) 
+
+
 ## Diagnosis
 
 - Pressing the title bar hands the drag to the WindowServer and switches
