@@ -921,6 +921,96 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 后台设置落盘
+// ---------------------------------------------------------------------------
+
+enum SaveRequest {
+    Write(Settings),
+    Flush,
+}
+
+/// 后台设置落盘:单写者线程保证写序,积压的 Write 合并成最后一份。
+/// RON 序列化 + 磁盘 I/O 不在 UI 线程执行,拖动窗口/切视图时零写入
+/// 停顿(ADR-0007)。防抖合并仍由调用方负责(300ms);`save` 只是把
+/// 最新设置移交写线程,永不阻塞。`flush` 在进程退出前阻塞等待已提交
+/// 写入全部落盘,此后本句柄不再可用。
+#[derive(Clone)]
+pub struct SettingsSaver {
+    inner: std::sync::Arc<SaverShared>,
+}
+
+struct SaverShared {
+    tx: std::sync::Mutex<Option<std::sync::mpsc::Sender<SaveRequest>>>,
+    done: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+}
+
+impl SettingsSaver {
+    /// 启动写线程(每进程一次)。
+    pub fn spawn() -> SettingsSaver {
+        let (tx, rx) = std::sync::mpsc::channel::<SaveRequest>();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        std::thread::Builder::new()
+            .name("settings-saver".to_string())
+            .spawn(move || {
+                // 单写者:请求按序处理;Write 只落盘最后一份。
+                while let Ok(req) = rx.recv() {
+                    match req {
+                        SaveRequest::Write(settings) => {
+                            let mut latest = settings;
+                            while let Ok(SaveRequest::Write(next)) = rx.try_recv() {
+                                latest = next;
+                            }
+                            let _ = save(&latest); // 失败静默:下次变更再试
+                        }
+                        SaveRequest::Flush => {
+                            let _ = done_tx.send(());
+                        }
+                    }
+                }
+            })
+            .ok();
+        SettingsSaver {
+            inner: std::sync::Arc::new(SaverShared {
+                tx: std::sync::Mutex::new(Some(tx)),
+                done: std::sync::Mutex::new(Some(done_rx)),
+            }),
+        }
+    }
+
+    /// 移交最新设置给写线程(非阻塞;写线程已退出时静默丢弃)。
+    pub fn save(&self, settings: Settings) {
+        let Ok(slot) = self.inner.tx.lock() else {
+            return;
+        };
+        if let Some(sender) = slot.as_ref() {
+            let _ = sender.send(SaveRequest::Write(settings));
+        }
+    }
+
+    /// 阻塞直至已提交的写入全部落盘(进程退出前兜底;此后不可再用)。
+    pub fn flush(&self) {
+        let sender = self
+            .inner
+            .tx
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take());
+        let Some(sender) = sender else { return };
+        let _ = sender.send(SaveRequest::Flush);
+        let done = self
+            .inner
+            .done
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take());
+        if let Some(rx) = done {
+            // 写线程异常退出时通道断开,recv 返回 Err,静默返回。
+            let _ = rx.recv();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

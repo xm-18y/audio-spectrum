@@ -16,14 +16,14 @@
 //!
 //! Threading model (ADR-0002): the audio callback writes the ring buffer
 //! inside `audio-spectrum-capture`; this UI thread pops samples, runs the FFT and
-//! paints, at a constant repaint rate.
+//! paints, at a constant repaint rate. Device enumeration and settings
+//! persistence run off the UI thread (ADR-0007).
 
 use audio_spectrum_app::{
     BackgroundSettings, DecayChoice, GlowLayout, Palette, ParticleEmission, ScaleMode,
-    ScreensaverStyle, Settings, SpectrumType, ThemePreset, ViewMode, WaveformColor, BAND_COUNT_MAX,
-    BAND_COUNT_MIN, autostart, band_color as palette_band_color, blur_rgba, keep_awake,
-    load as load_settings, pin_windows_wgpu_backend, resolve_palette, save as save_settings,
-    spectro_pixels,
+    ScreensaverStyle, Settings, SettingsSaver, SpectrumType, ThemePreset, ViewMode, WaveformColor,
+    BAND_COUNT_MAX, BAND_COUNT_MIN, autostart, band_color as palette_band_color, blur_rgba,
+    keep_awake, load as load_settings, pin_windows_wgpu_backend, resolve_palette, spectro_pixels,
 };
 #[cfg(target_os = "macos")]
 use audio_spectrum_app::{MenuCommand, NativeMenu};
@@ -271,10 +271,15 @@ struct SpectrumApp {
     /// `Some` = capturing; `None` + `reconnect_at` = Reconnect in progress.
     stream: Option<CaptureStream>,
     reconnect_at: Option<f64>,
-    /// Device list cache, refreshed once per second (enumeration is not free).
+    /// Device list cache, refreshed once per second (enumeration is not free,
+    /// and runs off the UI thread — ADR-0007).
     loopback_devices: Vec<DeviceInfo>,
     input_devices: Vec<DeviceInfo>,
     last_device_refresh: f64,
+    /// 后台设备枚举的回传通道;`None` = 无进行中的请求。
+    device_rx: Option<std::sync::mpsc::Receiver<(Vec<DeviceInfo>, Vec<DeviceInfo>)>>,
+    /// 后台设置落盘(单写者线程,ADR-0007)。
+    saver: SettingsSaver,
     frame_cost_ms: f64,
     frame_interval_ms: f64,
     last_frame_at: Option<f64>,
@@ -362,7 +367,7 @@ struct SpectrumApp {
 }
 
 impl SpectrumApp {
-    fn new(settings: Settings) -> SpectrumApp {
+    fn new(settings: Settings, saver: SettingsSaver) -> SpectrumApp {
         let system = CaptureSystem::new();
         // Design consensus: open Loopback (whatever the system is playing)
         // at startup; fall back to the default Input device.
@@ -384,6 +389,8 @@ impl SpectrumApp {
             loopback_devices: Vec::new(),
             input_devices: Vec::new(),
             last_device_refresh: f64::NEG_INFINITY,
+            device_rx: None,
+            saver: saver,
             frame_cost_ms: 0.0,
             frame_interval_ms: 16.7,
             last_frame_at: None,
@@ -542,22 +549,54 @@ impl SpectrumApp {
             self.staging.clear();
             self.reconnect_at = Some(now + 0.5);
         }
-        if now - self.last_device_refresh > 1.0 {
-            self.last_device_refresh = now;
-            self.loopback_devices = self.system.list_devices(SourceKind::Loopback);
-            self.input_devices = self.system.list_devices(SourceKind::Input);
-        }
+        self.refresh_devices(now);
         match (self.stream.is_none(), self.reconnect_at) {
             (true, Some(at)) if now >= at => self.attempt_open(now),
             (true, None) if self.source.is_some() => self.attempt_open(now),
             _ => {}
         }
-        // 设置防抖落盘。
+        // 设置防抖落盘:移交后台单写者线程(ADR-0007),主线程零磁盘 I/O。
         if let Some(at) = self.settings_dirty
             && at.elapsed() >= SAVE_DEBOUNCE
         {
-            let _ = save_settings(&self.settings); // 失败静默:下次变更再试
+            self.saver.save(self.settings.clone()); // 失败静默:下次变更再试
             self.settings_dirty = None;
+        }
+    }
+
+    /// 设备枚举完全移出 UI 线程(ADR-0007):cpal 的枚举/属性查询是同步
+    /// CoreAudio(WASAPI/PulseAudio)跨进程往返,拖动窗口时曾以 ~1Hz
+    /// 节奏阻塞主线程。改为后台线程枚举、每帧回收结果;防抖 1s,上一
+    /// 次请求未返回或疑似丢失(>5s)时重新发起。
+    fn refresh_devices(&mut self, now: f64) {
+        // 先回收上一次后台枚举结果(有则更新缓存)。
+        if let Some(rx) = self.device_rx.as_ref()
+            && let Ok((loopback, input)) = rx.try_recv()
+        {
+            self.loopback_devices = loopback;
+            self.input_devices = input;
+            self.device_rx = None;
+        }
+        // 疑似丢失(线程异常,结果永不返回):允许重新发起。
+        if self.device_rx.is_some() && now - self.last_device_refresh > 5.0 {
+            self.device_rx = None;
+        }
+        if self.device_rx.is_none() && now - self.last_device_refresh > 1.0 {
+            self.last_device_refresh = now;
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.device_rx = Some(rx);
+            std::thread::Builder::new()
+                .name("device-enum".to_string())
+                .spawn(move || {
+                    // 自建 CaptureSystem:枚举读系统设备列表,与主线程
+                    // 用于开流的 host 互不依赖。
+                    let system = CaptureSystem::new();
+                    let _ = tx.send((
+                        system.list_devices(SourceKind::Loopback),
+                        system.list_devices(SourceKind::Input),
+                    ));
+                })
+                .ok();
         }
     }
 
@@ -4758,7 +4797,9 @@ fn main() -> iced::Result {
         }
     }
 
-    let boot = move || SpectrumApp::new(settings.clone());
+    let saver = SettingsSaver::spawn();
+    let boot_saver = saver.clone();
+    let boot = move || SpectrumApp::new(settings.clone(), boot_saver.clone());
 
     let mut app = iced::application(boot, update, view)
         .title("audio-spectrum")
@@ -4776,6 +4817,8 @@ fn main() -> iced::Result {
     }
 
     let result = app.run();
+    // 退出前把已提交的设置写入全部落盘(防抖中退出的兑底,ADR-0007)。
+    saver.flush();
     // 正常退出时解除休眠抑制(Linux 需 kill 掉 systemd-inhibit 子进程;
     // Windows/macOS 的抑制本随进程消亡,复位仅为对称)。
     keep_awake::set_enabled(false);

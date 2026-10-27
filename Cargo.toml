@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/core", "crates/capture", "crates/app", "xtask"]
+# 独立复现工程(自持 Cargo.lock/target,不进 workspace 依赖图)。
+exclude = ["repro"]
 
 [workspace.package]
 version = "0.8.8"

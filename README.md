@@ -177,6 +177,11 @@ GitHub Actions(`.github/workflows/build.yml`)三平台构建:
     若要加,CI 需先发布 .sha256 摘要。
 - 设备身份:macOS 用 SCK 伪设备“系统音频输出”;Windows 用 WASAPI 端点 ID;
   Linux 用 PulseAudio monitor source 名;设备列表每秒轮询刷新。
+- macOS 26 拖动标题栏时起始瞬间卡顿(循环运行时明显,暂停后无;与单帧
+  成本无关):winit 0.30 macOS 刻意只在 Default 运行循环模式派发事件与
+  重绘,拖动起始切入 EventTracking 模式后帧循环被停住,直到第一个
+  `windowDidMove` 经委托路径同步泵起恢复。应用层无解,升级 winit/iced
+  或向上游报 issue(最小复现:repro/drag-stutter)。
 - macOS 26 的 SCStreamConfiguration 已无 `capturesCurrentAudioOutput`(13–15 的
   API),实现改用 display 范围 filter + `capturesAudio`(详见
   `crates/capture/src/macos.rs` 注释)。

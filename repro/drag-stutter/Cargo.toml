@@ -1,0 +1,16 @@
+[package]
+name = "drag-stutter-repro"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+iced = { version = "0.14", features = ["canvas"] }
+# 与主工程 Cargo.lock 对齐(winit 0.30.13),避免解析到不同 patch 版本
+# 导致复现结果不可比。
+winit = "=0.30.13"
+
+[profile.dev]
+# 复现性能问题必须接近 release 的代码路径(Debug 断言会放大噪源)。
+opt-level = 2
+debug = true
