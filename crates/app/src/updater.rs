@@ -180,17 +180,14 @@ fn http_get(url: &str) -> Result<String, String> {
 // 下载 + 解压
 // ---------------------------------------------------------------------------
 
-/// 下载资产到可执行文件同卷的临时目录(换装需 rename 同卷),解压并定位
+/// 下载资产到换装目标同卷的临时目录(换装需 rename 同卷),解压并定位
 /// 新版可执行产物;`progress` 按已下载字节节流回调。
 fn download_and_extract(
     info: &ReleaseInfo,
     progress: impl Fn(u64, u64),
 ) -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| format!("无法定位当前程序:{e}"))?;
-    let work = exe
-        .parent()
-        .ok_or("当前程序路径异常")?
-        .join(".update-tmp");
+    let work = staging_dir(&exe).ok_or("当前程序路径异常")?;
     std::fs::create_dir_all(&work).map_err(|e| format!("无法创建临时目录:{e}"))?;
     let archive = work.join(&info.asset_name);
     download_to(info, &archive, &progress)?;
@@ -312,6 +309,17 @@ fn macos_bundle_dir(exe: &Path) -> Option<PathBuf> {
     contents.parent().map(|b| b.to_path_buf())
 }
 
+/// 换装临时目录:必须在待替换目标同卷(rename 限制),且**不能位于 .app
+/// 包内**——包整体改名让位时会把包内临时目录连同新版本一起带走,导致
+/// 安置新版本时源路径不存在(ENOENT)。macOS 包模式落在包旁边(如
+/// `/Applications/.update-tmp`),其余情况落在可执行文件同目录。
+fn staging_dir(exe: &Path) -> Option<PathBuf> {
+    let base = macos_bundle_dir(exe)
+        .and_then(|b| b.parent().map(Path::to_path_buf))
+        .or_else(|| exe.parent().map(Path::to_path_buf))?;
+    Some(base.join(".update-tmp"))
+}
+
 /// 用下载好的新版本原地换装并重启:当前可执行/包重命名为 `.old`,
 /// 新版就位,拉起新进程后退出本进程。失败时回滚改名。
 pub fn install(new_path: &Path) -> Result<(), String> {
@@ -363,12 +371,16 @@ fn rename_or_rollback(
 
 /// 删除换装残留(old 文件与临时目录);失败静默——下次启动再清。
 pub fn cleanup_stale() {
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let _ = std::fs::remove_dir_all(dir.join(".update-tmp"));
+    if let Ok(exe) = std::env::current_exe() {
         let _ = std::fs::remove_file(exe.with_extension("old"));
         let _ = std::fs::remove_file(exe.with_extension("app.old"));
+        if let Some(staging) = staging_dir(&exe) {
+            let _ = std::fs::remove_dir_all(staging);
+        }
+        // 兜底:旧版本可能把临时目录建在可执行文件同目录(含包内)。
+        if let Some(dir) = exe.parent() {
+            let _ = std::fs::remove_dir_all(dir.join(".update-tmp"));
+        }
     }
 }
 
@@ -482,5 +494,24 @@ mod tests {
             ["windows-x64", "macos-arm64", "linux-x64", ""].contains(&key),
             "未预期平台:{key}"
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn staging_dir_stays_outside_bundle() {
+        // 包内运行:临时目录必须落在包旁边(包改名时不被带走)。
+        let exe = Path::new("/Applications/audio-spectrum.app/Contents/MacOS/audio-spectrum");
+        assert_eq!(
+            staging_dir(exe),
+            Some(PathBuf::from("/Applications/.update-tmp"))
+        );
+        // 裸二进制:同目录即可。
+        let exe = Path::new("/usr/local/bin/audio-spectrum");
+        assert_eq!(
+            staging_dir(exe),
+            Some(PathBuf::from("/usr/local/bin/.update-tmp"))
+        );
+        // 无目录前缀的裸文件名:parent() 返回空路径,落盘到当前目录。
+        assert_eq!(staging_dir(Path::new("audio-spectrum")), Some(PathBuf::from(".update-tmp")));
     }
 }
