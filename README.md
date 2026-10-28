@@ -94,7 +94,6 @@ crates/
   让位 → 新版就位 → 拉起新进程」(macOS .app 整包替换),启动时自动
   清理残留,失败回滚并可重试。术语与决策见 GLOSSARY.md Updater 节与
   docs/adr/0004
-
 - ✅ v0.6.0 应用菜单栏 + Windows Loopback 修复:非 macOS 取消右键菜单,
   改为窗口顶部常驻应用菜单栏;视图菜单聚合视图/全屏/窗口(启动全屏、
   置顶、记忆)/频段数(1–255 滑杆连续可调)/衰减速度(极慢—极快五档),
@@ -114,6 +113,7 @@ crates/
   全屏、尺寸位置记忆);频谱占满窗体,配置全部收进 ⚙ 菜单;全屏时
   顶栏自动隐藏(贴顶 8px 浮现),ESC/右键退全屏
 - ✅ v0.2.0 功能纵深(陪伴式视觉化,ADR-0003):
+
   - **语谱图**(Spectrogram):12s 滚动历史、20ms 列聚合(窗口最大值)、
     复用 96 Band 对数轴、纹理单 quad 渲染;`S` 键或顶栏按钮切换
   - **检视交互**:悬停显示 `频率 · dB`(光标跟随);`Space` 冻结画面
@@ -121,16 +121,18 @@ crates/
   - **窗口置顶** toggle(陪伴场景钉在角落)
 - ✅ 输入采集(麦克风/线路输入):三平台,含设备选择与断线重连
 - ✅ Loopback(系统回环):三平台后端已实现
+
   - macOS:ScreenCaptureKit,实机验证(集成测试:`cargo test -p audio-spectrum-capture`)
   - Windows:WASAPI loopback,交叉编译验证(x86_64-pc-windows-msvc,待实机)
   - Linux:PulseAudio monitor(PipeWire 经兼容层),源码级验证(待 Linux 机器编译)
 - ✅ 频谱管线 + 平滑 + Peak Hold + 语谱历史 + 设置中枢:22 个测试全绿,clippy 零警告
 - ✅ 性能预算:已仪表化
+
   - 自动断言:`cargo test -p audio-spectrum-core --test perf`(实测 release 25.6µs/帧,
     帧预算 16.7ms 的 0.15%,验证 ADR-0002 的微秒级假设)
   - 运行时 HUD:顶栏实时显示「ms/帧 · fps · ≈% CPU」(帧耗时 EMA ≈ 60 帧)
   - 端到端延迟 < 50ms:受采集后端影响,需实机人工验收(轮询后端 10ms 周期)
-    
+
 ## CI / 下载
 
 GitHub Actions(`.github/workflows/build.yml`)三平台构建:
